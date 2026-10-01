@@ -22,51 +22,72 @@ import { RichEditor } from "@/components/rich-editor";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
+import { createClient } from "@/utils/supabase/client";
 
-type Note = { id: string; title: string; slug: string; content: string; updatedAt: number; locked: boolean };
+type Note = { id: string; title: string; slug: string; content: string; updatedAt: number; version: number };
 type SaveState = "saved" | "saving" | "error";
 
 const starterNotes: Note[] = [
   {
     id: "note-welcome",
-    title: "Mulai di sini",
+    title: "Getting started",
     slug: "mulai-di-sini",
     updatedAt: Date.now() - 1000 * 60 * 12,
-    locked: false,
-    content: `# Catatan yang selalu dekat.\n\nSelamat datang di **NiftyDock Notepad** — ruang kecil untuk ide, rencana, dan hal-hal yang ingin kamu bawa ke mana saja.\n\nTulis dengan bebas. Catatanmu bisa dibuka lewat satu tautan, tanpa perlu membuat akun.\n\n## Coba editor ini\n\n- **Tebal**, *miring*, dan tautan\n- Daftar yang bisa dicentang\n- Kutipan dan blok kode\n\n## Bagikan dalam tiga langkah\n\n1. Tulis catatan\n2. Salin tautannya\n3. Buka dari perangkat lain\n\n> Tip: tekan tombol / untuk mulai menambahkan format.\n\n## Rencana hari ini\n\n- [x] Buka catatan pertama\n- [ ] Tulis sesuatu yang ingin diingat\n- [ ] Bagikan tautan ke perangkat lain\n\n---\n\n*Draf tersimpan di perangkat ini selama backend belum tersambung.*`,
+    version: 1,
+    content: `# Notes, always within reach.\n\nWelcome to **NiftyDock Notepad** — a simple space for ideas, plans, and anything you want to keep close.\n\nWrite freely. Open your notes from any device with a single link, no account required.\n\n## Try the editor\n\n- **Bold**, *italic*, and links\n- Checkable lists\n- Quotes and code blocks\n\n## Share in three steps\n\n1. Write a note\n2. Copy its link\n3. Open it on another device\n\n> Tip: Press / to add formatting.\n\n## Today's plan\n\n- [x] Open your first note\n- [ ] Write down something to remember\n- [ ] Share a link with another device\n\n---\n\n*Your draft is saved on this device while the backend is being set up.*`,
   },
   {
     id: "note-ideas",
-    title: "Ide produk",
+    title: "Product ideas",
     slug: "ide-produk",
     updatedAt: Date.now() - 1000 * 60 * 60 * 3,
-    locked: false,
-    content: `## Yang ingin dibuat\n\n- Catatan yang cepat dibuka dari mana saja\n- Markdown yang nyaman ditulis dan dibaca\n- Kolaborasi ringan tanpa akun\n\n## Pertanyaan\n\n> Bagaimana jika berbagi catatan sesederhana berbagi link?\n\nSimpan ide kecil di sini, lalu kembali lagi kapan pun.`,
+    version: 1,
+    content: `## What to build\n\n- Notes that open quickly from anywhere\n- Markdown that's comfortable to write and read\n- Lightweight collaboration without accounts\n\n## A question\n\n> What if sharing a note were as simple as sharing a link?\n\nSave an idea here and come back to it anytime.`,
   },
   {
     id: "note-list",
-    title: "Belanja akhir pekan",
+    title: "Weekend shopping",
     slug: "belanja-akhir-pekan",
     updatedAt: Date.now() - 1000 * 60 * 60 * 25,
-    locked: false,
-    content: `## Pasar\n- [ ] Alpukat\n- [ ] Roti sourdough\n- [x] Susu oat\n\n## Jangan lupa\n\nBawa tas belanja dari rumah.`,
+    version: 1,
+    content: `## Grocery store\n- [ ] Avocados\n- [ ] Sourdough bread\n- [x] Oat milk\n\n## Don't forget\n\nBring a reusable bag.`,
   },
 ];
 
 const rootDraftNote: Note = {
   id: "root-draft",
-  title: "Catatan baru",
+  title: "New note",
   slug: "",
   content: "",
   updatedAt: 0,
-  locked: false,
+  version: 0,
 };
+
+type ApiNote = {
+  id: string;
+  title: string;
+  slug: string;
+  content: string;
+  updated_at: string;
+  version: number | string;
+};
+
+function fromApiNote(note: ApiNote): Note {
+  return {
+    id: note.id,
+    title: note.title,
+    slug: note.slug,
+    content: note.content,
+    updatedAt: new Date(note.updated_at).getTime(),
+    version: Number(note.version),
+  };
+}
 
 function formatDate(timestamp: number) {
   const date = new Date(timestamp);
   const now = new Date();
-  if (date.toDateString() === now.toDateString()) return `Hari ini, ${date.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })}`;
-  return date.toLocaleDateString("id-ID", { day: "numeric", month: "short" });
+  if (date.toDateString() === now.toDateString()) return `Today, ${date.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })}`;
+  return date.toLocaleDateString("en-US", { day: "numeric", month: "short" });
 }
 
 function wordCount(value: unknown) {
@@ -80,16 +101,18 @@ function normalizeNoteSlug(slug: string) {
 
 function createRandomSlug(existingSlugs: Iterable<string>) {
   const usedSlugs = new Set(existingSlugs);
+  const alphabet = "0123456789abcdefghijklmnopqrstuvwxyz";
   let slug = "";
   do {
-    slug = Math.random().toString(36).slice(2, 8).padEnd(6, "0");
+    const bytes = crypto.getRandomValues(new Uint8Array(6));
+    slug = Array.from(bytes, (byte) => alphabet[byte % alphabet.length]).join("");
   } while (usedSlugs.has(slug));
   return slug;
 }
 
 function LoadingSkeleton() {
   return (
-    <div className="document-scroll" aria-label="Memuat isi catatan" aria-busy="true">
+    <div className="document-scroll" aria-label="Loading note content" aria-busy="true">
       <article className="document-canvas">
         <div className="skeleton skeleton-title" />
         <div className="skeleton skeleton-meta" />
@@ -113,11 +136,11 @@ export function NotepadApp({ initialSlug }: { initialSlug?: string }) {
     if (starterNotes.some((note) => note.slug === requestedSlug)) return starterNotes;
     return [{
       id: "route-placeholder",
-      title: "Catatan baru",
+      title: "New note",
       slug: requestedSlug,
       content: "",
       updatedAt: 0,
-      locked: false,
+      version: 0,
     }, ...starterNotes];
   });
   const [selectedId, setSelectedId] = useState(() => {
@@ -128,94 +151,237 @@ export function NotepadApp({ initialSlug }: { initialSlug?: string }) {
   const [hydratedRoute, setHydratedRoute] = useState<string | null>(null);
   const isHydrated = hydratedRoute === routeKey;
   const [saveState, setSaveState] = useState<SaveState>("saved");
+  const [realtimeState, setRealtimeState] = useState<"connecting" | "connected" | "offline">("connecting");
   const [copied, setCopied] = useState(false);
   const [copyFailed, setCopyFailed] = useState(false);
   const [editor, setEditor] = useState<Editor | null>(null);
   const [linkEditorOpen, setLinkEditorOpen] = useState(false);
   const [linkUrl, setLinkUrl] = useState("");
-  const initializedRouteRef = useRef<string | null>(null);
+  const versionsRef = useRef<Record<string, number>>({});
+  const lastSavedRef = useRef<Record<string, string>>({});
+  const pendingSavesRef = useRef<Record<string, boolean>>({});
+  const notesRef = useRef<Note[]>(notes);
+  const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
+  notesRef.current = notes;
 
   useEffect(() => {
-    if (initializedRouteRef.current === routeKey) return;
-    initializedRouteRef.current = routeKey;
+    let active = true;
 
-    try {
-      const raw = localStorage.getItem("niftydock-notes-v12");
-      const parsed = raw ? JSON.parse(raw) : starterNotes;
-      const stored: Note[] = Array.isArray(parsed)
-        ? parsed.map((item) => ({
-            id: typeof item?.id === "string" ? item.id : `note-${Math.random().toString(36).slice(2, 9)}`,
-            title: typeof item?.title === "string" ? item.title : "Catatan tanpa judul",
-            slug: typeof item?.slug === "string" ? normalizeNoteSlug(item.slug) : "catatan-baru",
-            content: typeof item?.content === "string"
-              ? item.content
-              : starterNotes.find((note) => note.slug === item?.slug)?.content ?? "",
+    const loadRouteNote = async () => {
+      let stored: Note[] = [];
+      try {
+        const parsed: unknown = JSON.parse(localStorage.getItem("niftydock-notes-v12") ?? "null");
+        if (Array.isArray(parsed)) {
+          stored = parsed.map((item) => ({
+            id: typeof item?.id === "string" ? item.id : `local-${Math.random().toString(36).slice(2, 9)}`,
+            title: typeof item?.title === "string" ? item.title : "New note",
+            slug: typeof item?.slug === "string" ? normalizeNoteSlug(item.slug) : "",
+            content: typeof item?.content === "string" ? item.content : "",
             updatedAt: typeof item?.updatedAt === "number" ? item.updatedAt : Date.now(),
-            locked: item?.locked === true,
-          }))
-        : starterNotes;
-      if (stored.length) setNotes(stored);
-      const rawRequestedSlug = initialSlug ?? window.location.pathname.slice(1);
-      if (!rawRequestedSlug) {
-        const now = Date.now();
-        const slug = createRandomSlug(stored.map((note) => note.slug));
-        const note: Note = {
-          id: `note-${now}-${slug}`,
-          title: "Catatan baru",
-          slug,
-          content: "",
-          updatedAt: now,
-          locked: false,
-        };
-        const nextNotes = [note, ...stored];
-        setNotes(nextNotes);
-        setSelectedId(note.id);
-        try {
-          localStorage.setItem("niftydock-notes-v12", JSON.stringify(nextNotes));
-        } catch {
-          // Keep the new note available for this session if local storage is unavailable.
+            version: Number.isInteger(item?.version) ? item.version : 0,
+          }));
         }
-        window.history.replaceState(null, "", `/${encodeURIComponent(slug)}`);
-        setHydratedRoute(routeKey);
-        return;
+      } catch {
+        // Invalid local cache is ignored; Supabase remains the source of truth.
       }
-      const requestedSlug = normalizeNoteSlug(rawRequestedSlug);
-      const match = stored.find((note) => note.slug === requestedSlug);
-      if (match) setSelectedId(match.id);
-      else if (requestedSlug) {
-        const note: Note = {
-          id: `note-${Date.now()}`,
-          title: requestedSlug.split("-").map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(" "),
-          slug: requestedSlug,
-          content: "# Catatan baru\n\n",
+
+      const requestedSlug = initialSlug
+        ? normalizeNoteSlug(initialSlug)
+        : normalizeNoteSlug(window.location.pathname.slice(1));
+      const cachedNote = requestedSlug ? stored.find((note) => note.slug === requestedSlug) : undefined;
+      let loadedNote: Note | null = null;
+      let loadError = false;
+
+      try {
+        if (!requestedSlug) {
+          const response = await fetch("/api/notes", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ title: "New note", content: "" }),
+          });
+          if (!response.ok) throw new Error("Could not create a new note.");
+          const result = await response.json();
+          loadedNote = fromApiNote(result.note as ApiNote);
+        } else {
+          let response = await fetch(`/api/notes/${encodeURIComponent(requestedSlug)}`, { cache: "no-store" });
+          if (response.status === 404) {
+            response = await fetch("/api/notes", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                slug: requestedSlug,
+                title: cachedNote?.title ?? "New note",
+                content: cachedNote?.content ?? "",
+              }),
+            });
+            if (response.status === 409) {
+              response = await fetch(`/api/notes/${encodeURIComponent(requestedSlug)}`, { cache: "no-store" });
+            }
+          }
+          if (!response.ok) {
+            throw new Error("Could not load the note.");
+          } else {
+            const result = await response.json();
+            loadedNote = fromApiNote(result.note as ApiNote);
+          }
+        }
+      } catch {
+        loadError = true;
+        loadedNote = {
+          id: `offline-${Date.now()}`,
+          title: cachedNote?.title ?? "New note",
+          slug: requestedSlug || createRandomSlug(stored.map((note) => note.slug)),
+          content: cachedNote?.content ?? "",
           updatedAt: Date.now(),
-          locked: false,
+          version: 0,
         };
-        setNotes((current) => [note, ...current]);
-        setSelectedId(note.id);
       }
-    } catch {
-      // Ignore an invalid local draft and keep the starter notes.
-    }
-    setHydratedRoute(routeKey);
+
+      if (!active || !loadedNote) return;
+      const nextNotes = [loadedNote, ...stored.filter((note) => note.slug !== loadedNote?.slug)];
+      setNotes(nextNotes);
+      setSelectedId(loadedNote.id);
+      if (loadedNote.version > 0) {
+        versionsRef.current[loadedNote.slug] = loadedNote.version;
+        lastSavedRef.current[loadedNote.slug] = JSON.stringify([loadedNote.title, loadedNote.content]);
+      }
+      setSaveState(loadError ? "error" : "saved");
+      setRealtimeState("connecting");
+      if (!requestedSlug) window.history.replaceState(null, "", `/${encodeURIComponent(loadedNote.slug)}`);
+      setHydratedRoute(routeKey);
+    };
+
+    void loadRouteNote();
+    return () => {
+      active = false;
+    };
   }, [initialSlug, routeKey]);
 
   useEffect(() => {
     if (!isHydrated) return;
-    setSaveState("saving");
-    let saved = true;
     try {
       localStorage.setItem("niftydock-notes-v12", JSON.stringify(notes));
     } catch {
-      saved = false;
+      // The current session can continue if browser storage is unavailable.
     }
-    const timeout = window.setTimeout(() => setSaveState(saved ? "saved" : "error"), 450);
-    return () => window.clearTimeout(timeout);
   }, [isHydrated, notes]);
 
   const selected = notes.find((note) => note.id === selectedId) ?? notes[0];
   const storedContent = selected?.content;
   const selectedContent = typeof storedContent === "string" ? storedContent : "";
+
+  useEffect(() => {
+    if (!isHydrated || !selected) return;
+    const fingerprint = JSON.stringify([selected.title, selectedContent]);
+    if (lastSavedRef.current[selected.slug] === fingerprint) return;
+
+    const timeout = window.setTimeout(() => {
+      setSaveState("saving");
+      saveQueueRef.current = saveQueueRef.current
+        .then(async () => {
+          const version = versionsRef.current[selected.slug] ?? selected.version;
+          pendingSavesRef.current[selected.slug] = true;
+          try {
+            const response = version > 0
+              ? await fetch(`/api/notes/${encodeURIComponent(selected.slug)}`, {
+                  method: "PATCH",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ title: selected.title, content: selectedContent, version }),
+                })
+              : await fetch("/api/notes", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ slug: selected.slug, title: selected.title, content: selectedContent }),
+                });
+
+            if (!response.ok) throw new Error("Could not save the note.");
+            const result = await response.json();
+            const savedNote = fromApiNote(result.note as ApiNote);
+            versionsRef.current[savedNote.slug] = savedNote.version;
+            lastSavedRef.current[savedNote.slug] = JSON.stringify([savedNote.title, savedNote.content]);
+            setNotes((current) => current.map((note) => note.slug === savedNote.slug
+              ? { ...note, id: savedNote.id, version: savedNote.version, updatedAt: savedNote.updatedAt }
+              : note));
+            setSaveState("saved");
+          } finally {
+            delete pendingSavesRef.current[selected.slug];
+          }
+        })
+        .catch(() => setSaveState("error"));
+    }, 650);
+
+    return () => window.clearTimeout(timeout);
+  }, [isHydrated, selected, selectedContent]);
+
+  useEffect(() => {
+    if (!isHydrated || !selected?.slug) {
+      setRealtimeState("offline");
+      return;
+    }
+
+    let active = true;
+    let supabase: ReturnType<typeof createClient>;
+    try {
+      supabase = createClient();
+    } catch {
+      setRealtimeState("offline");
+      return;
+    }
+
+    const channel = supabase
+      .channel(`note:${selected.slug}`, { config: { private: true } })
+      .on("broadcast", { event: "note_updated" }, async ({ payload }) => {
+        if (!active) return;
+        const incomingVersion = Number(payload?.version);
+        if (!Number.isFinite(incomingVersion)) return;
+        if (pendingSavesRef.current[selected.slug]) return;
+        const current = notesRef.current.find((note) => note.slug === selected.slug);
+        if (!current) return;
+        if (incomingVersion <= (versionsRef.current[selected.slug] ?? current.version)) return;
+
+        const currentFingerprint = JSON.stringify([current.title, current.content]);
+        if (lastSavedRef.current[selected.slug] !== currentFingerprint) {
+          setSaveState("error");
+          return;
+        }
+
+        try {
+          const response = await fetch(`/api/notes/${encodeURIComponent(selected.slug)}`, { cache: "no-store" });
+          if (!response.ok) return;
+          const result = await response.json();
+          const remoteNote = fromApiNote(result.note as ApiNote);
+          if (!active) return;
+          const latest = notesRef.current.find((note) => note.slug === selected.slug);
+          if (!latest || JSON.stringify([latest.title, latest.content]) !== currentFingerprint) {
+            setSaveState("error");
+            return;
+          }
+
+          versionsRef.current[remoteNote.slug] = remoteNote.version;
+          lastSavedRef.current[remoteNote.slug] = JSON.stringify([remoteNote.title, remoteNote.content]);
+          setNotes((currentNotes) => currentNotes.map((note) => note.slug === remoteNote.slug
+            ? { ...note, title: remoteNote.title, content: remoteNote.content, updatedAt: remoteNote.updatedAt, version: remoteNote.version }
+            : note));
+          setSaveState("saved");
+        } catch {
+          // A later Realtime event or a reload will fetch the latest saved note.
+        }
+      })
+      .subscribe((status) => {
+        if (!active) return;
+        if (status === "SUBSCRIBED") setRealtimeState("connected");
+        else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
+          setRealtimeState("offline");
+        }
+      });
+
+    return () => {
+      active = false;
+      setRealtimeState("offline");
+      void supabase.removeChannel(channel);
+    };
+  }, [isHydrated, selected?.slug]);
+
   const updateContent = useCallback((markdown: unknown) => {
     const content = typeof markdown === "string" ? markdown : "";
     const updatedAt = Date.now();
@@ -251,7 +417,7 @@ export function NotepadApp({ initialSlug }: { initialSlug?: string }) {
     if (empty) {
       editor.chain().focus().insertContent({
         type: "text",
-        text: "tautan",
+        text: "link text",
         marks: [{ type: "link", attrs: { href: destination } }],
       }).run();
     } else {
@@ -261,17 +427,34 @@ export function NotepadApp({ initialSlug }: { initialSlug?: string }) {
     setLinkEditorOpen(false);
   };
 
-  const createNote = () => {
+  const createNote = async () => {
     const now = Date.now();
-    const slug = createRandomSlug(notes.map((note) => note.slug));
-    const note: Note = {
-      id: `note-${now}-${slug}`,
-      title: "Catatan baru",
-      slug,
-      content: "",
-      updatedAt: now,
-      locked: false,
-    };
+    setSaveState("saving");
+    let note: Note;
+    try {
+      const response = await fetch("/api/notes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: "New note", content: "" }),
+      });
+      if (!response.ok) throw new Error("Could not create the note.");
+      const result = await response.json();
+      note = fromApiNote(result.note as ApiNote);
+      versionsRef.current[note.slug] = note.version;
+      lastSavedRef.current[note.slug] = JSON.stringify([note.title, note.content]);
+      setSaveState("saved");
+    } catch {
+      const slug = createRandomSlug(notes.map((item) => item.slug));
+      note = {
+        id: `offline-${now}-${slug}`,
+        title: "New note",
+        slug,
+        content: "",
+        updatedAt: now,
+        version: 0,
+      };
+      setSaveState("error");
+    }
     setNotes((current) => [note, ...current]);
     setSelectedId(note.id);
     window.history.replaceState(null, "", `/${encodeURIComponent(note.slug)}`);
@@ -317,37 +500,37 @@ export function NotepadApp({ initialSlug }: { initialSlug?: string }) {
             </div>
           </div>
           <div className="topbar-right">
-            <Button variant="ghost" size="sm" className="new-note-button" onClick={createNote} disabled={!isHydrated}><Plus size={15} /><span>Catatan baru</span></Button>
-            <Button variant="subtle" size="sm" className="share-button" onClick={copyLink} disabled={!isHydrated}>{copied ? <Check size={14} /> : <Share2 size={14} />}<span>{copied ? "Tersalin" : copyFailed ? "Gagal menyalin" : "Bagikan"}</span></Button>
+            <Button variant="ghost" size="sm" className="new-note-button" onClick={createNote} disabled={!isHydrated}><Plus size={15} /><span>New note</span></Button>
+            <Button variant="subtle" size="sm" className="share-button" onClick={copyLink} disabled={!isHydrated}>{copied ? <Check size={14} /> : <Share2 size={14} />}<span>{copied ? "Copied" : copyFailed ? "Copy failed" : "Share"}</span></Button>
           </div>
         </header>
 
         <div className="editor-toolbar-wrap">
           <div className="editor-toolbar">
             <div className="toolbar-group">
-              <ToolbarButton label="Judul 1" onClick={() => applyMarkdown("h1")} active={!!editor?.isActive("heading", { level: 1 })}><Heading1 size={16} /></ToolbarButton>
-              <ToolbarButton label="Judul 2" onClick={() => applyMarkdown("h2")} active={!!editor?.isActive("heading", { level: 2 })}><Heading2 size={16} /></ToolbarButton>
+              <ToolbarButton label="Heading 1" onClick={() => applyMarkdown("h1")} active={!!editor?.isActive("heading", { level: 1 })}><Heading1 size={16} /></ToolbarButton>
+              <ToolbarButton label="Heading 2" onClick={() => applyMarkdown("h2")} active={!!editor?.isActive("heading", { level: 2 })}><Heading2 size={16} /></ToolbarButton>
             </div>
             <span className="toolbar-separator" />
             <div className="toolbar-group">
-              <ToolbarButton label="Tebal" onClick={() => applyMarkdown("bold")} active={!!editor?.isActive("bold")}><Bold size={15} /></ToolbarButton>
-              <ToolbarButton label="Miring" onClick={() => applyMarkdown("italic")} active={!!editor?.isActive("italic")}><Italic size={15} /></ToolbarButton>
+              <ToolbarButton label="Bold" onClick={() => applyMarkdown("bold")} active={!!editor?.isActive("bold")}><Bold size={15} /></ToolbarButton>
+              <ToolbarButton label="Italic" onClick={() => applyMarkdown("italic")} active={!!editor?.isActive("italic")}><Italic size={15} /></ToolbarButton>
               <div className="link-toolbar-group">
-                <ToolbarButton label="Tautan" onClick={() => setLinkEditorOpen((open) => !open)} active={linkEditorOpen || !!editor?.isActive("link")}><Link2 size={15} /></ToolbarButton>
+                <ToolbarButton label="Link" onClick={() => setLinkEditorOpen((open) => !open)} active={linkEditorOpen || !!editor?.isActive("link")}><Link2 size={15} /></ToolbarButton>
                 {linkEditorOpen && <form className="link-popover" onSubmit={applyLink}>
-                  <Input autoFocus aria-label="Alamat tautan" placeholder="https://alamat.com" value={linkUrl} onChange={(event) => setLinkUrl(event.target.value)} className="link-url-input" />
-                  <Button type="submit" size="sm" className="link-apply-button">Terapkan</Button>
+                  <Input autoFocus aria-label="Link URL" placeholder="https://example.com" value={linkUrl} onChange={(event) => setLinkUrl(event.target.value)} className="link-url-input" />
+                  <Button type="submit" size="sm" className="link-apply-button">Apply</Button>
                 </form>}
               </div>
             </div>
             <span className="toolbar-separator" />
             <div className="toolbar-group">
-              <ToolbarButton label="Daftar berpoin" onClick={() => applyMarkdown("bullet")} active={!!editor?.isActive("bulletList")}><List size={16} /></ToolbarButton>
-              <ToolbarButton label="Daftar bernomor" onClick={() => applyMarkdown("ordered")} active={!!editor?.isActive("orderedList")}><ListOrdered size={16} /></ToolbarButton>
+              <ToolbarButton label="Bulleted list" onClick={() => applyMarkdown("bullet")} active={!!editor?.isActive("bulletList")}><List size={16} /></ToolbarButton>
+              <ToolbarButton label="Numbered list" onClick={() => applyMarkdown("ordered")} active={!!editor?.isActive("orderedList")}><ListOrdered size={16} /></ToolbarButton>
               <ToolbarButton label="Checklist" onClick={() => applyMarkdown("checklist")} active={!!editor?.isActive("taskList")}><ListChecks size={16} /></ToolbarButton>
-              <ToolbarButton label="Kutipan" onClick={() => applyMarkdown("quote")} active={!!editor?.isActive("blockquote")}><Quote size={15} /></ToolbarButton>
-              <ToolbarButton label="Blok kode" onClick={() => applyMarkdown("code")} active={!!editor?.isActive("codeBlock")}><Code2 size={15} /></ToolbarButton>
-              <ToolbarButton label="Tabel" onClick={() => applyMarkdown("table")}><Table2 size={15} /></ToolbarButton>
+              <ToolbarButton label="Block quote" onClick={() => applyMarkdown("quote")} active={!!editor?.isActive("blockquote")}><Quote size={15} /></ToolbarButton>
+              <ToolbarButton label="Code block" onClick={() => applyMarkdown("code")} active={!!editor?.isActive("codeBlock")}><Code2 size={15} /></ToolbarButton>
+              <ToolbarButton label="Table" onClick={() => applyMarkdown("table")}><Table2 size={15} /></ToolbarButton>
             </div>
           </div>
         </div>
@@ -355,7 +538,7 @@ export function NotepadApp({ initialSlug }: { initialSlug?: string }) {
         {!isHydrated ? <LoadingSkeleton /> : <div className="document-scroll">
           <article className="document-canvas">
             <input
-              aria-label="Judul catatan"
+              aria-label="Note title"
               className="document-title"
               value={selected.title}
               onChange={(event) => {
@@ -365,9 +548,9 @@ export function NotepadApp({ initialSlug }: { initialSlug?: string }) {
                   return current.map((note) => note.id === selectedId ? { ...note, title, updatedAt } : note);
                 });
               }}
-              placeholder="Judul catatan"
+              placeholder="Untitled note"
             />
-            <div className="document-meta">{isHydrated ? `Terakhir diubah ${formatDate(selected.updatedAt).toLowerCase()}` : "Terakhir diubah"}</div>
+            <div className="document-meta">{isHydrated ? `Last edited ${formatDate(selected.updatedAt).toLowerCase()}` : "Last edited"}</div>
             <div className="rich-editor">
               <RichEditor key={selected.id} value={selectedContent} onChange={updateContent} onEditorReady={setEditor} />
             </div>
@@ -375,10 +558,14 @@ export function NotepadApp({ initialSlug }: { initialSlug?: string }) {
           <div className="page-bottom-spacer" />
         </div>}
 
-        <footer className="statusbar">
-          <div className="status-left"><span><span className="status-purple-dot" />{!isHydrated ? "Memuat catatan..." : saveState === "saving" ? "Menyimpan" : saveState === "error" ? "Gagal menyimpan" : "Tersimpan di perangkat ini"}</span></div>
-          <div className="status-right"><span>{isHydrated ? `${wordCount(selectedContent)} kata` : "— kata"}</span><span className="status-divider" /><span>Sinkronisasi belum aktif</span></div>
-        </footer>
+        <div className="statusbar" role="status" aria-label="Note status">
+          <div className="status-left"><span><span className="status-purple-dot" />{!isHydrated ? "Loading note..." : saveState === "saving" ? "Saving" : saveState === "error" ? "Save failed" : "Saved to Supabase"}</span></div>
+          <div className="status-right">
+            <span>{isHydrated ? `${wordCount(selectedContent)} words` : "— words"}</span>
+            <span className="status-divider" />
+            <span>{realtimeState === "connected" ? "Live active" : realtimeState === "connecting" ? "Connecting..." : "Live disconnected"}</span>
+          </div>
+        </div>
       </section>
     </main>
   );

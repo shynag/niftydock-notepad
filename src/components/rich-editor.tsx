@@ -66,7 +66,7 @@ export function RichEditor({ value, onChange, onEditorReady }: RichEditorProps) 
       TableRow,
       TableHeader,
       TableCell,
-      Placeholder.configure({ placeholder: "Mulai menulis catatan..." }),
+      Placeholder.configure({ placeholder: "Start writing..." }),
       Markdown.configure({ markedOptions: { gfm: true } }),
     ],
     editorProps: {
@@ -100,8 +100,13 @@ export function RichEditor({ value, onChange, onEditorReady }: RichEditorProps) 
   }, [editor, updateTableControlsPosition]);
 
   useEffect(() => {
-    if (!editor || editor.isFocused || editor.getMarkdown() === value) return;
+    if (!editor || editor.getMarkdown() === value) return;
+    const selection = editor.state.selection;
     editor.commands.setContent(value, { contentType: "markdown", emitUpdate: false });
+    if (editor.isFocused) {
+      const position = Math.min(selection.from, editor.state.doc.content.size);
+      editor.commands.setTextSelection(position);
+    }
   }, [editor, value]);
 
   return (

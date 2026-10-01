@@ -71,10 +71,7 @@ button { cursor: pointer; }
 .save-dot-saving { background: #b594fa; animation: pulse .75s infinite alternate; }
 @keyframes pulse { to { opacity: .35; } }
 .topbar-divider { width: 1px; height: 19px; background: #302d36; }
-.share-button { border: 1px solid #35303f; background: #201d27; color: #ded7ed; }
-.share-button:hover { border-color: #615079; background: #282330; }
-.new-note-button { gap: 6px; color: #b9b2c1; }
-.new-note-button:hover { color: #f2eef8; background: #211f27; }
+.new-note-button { gap: 6px; }
 .editor-toolbar-wrap { display: flex; min-height: 58px; align-items: center; justify-content: center; border-bottom: 1px solid #25222b; background: #151419; padding: 0 22px; }
 .editor-toolbar-wrap { scrollbar-color: #403e46 #151419; }
 .editor-toolbar-wrap::-webkit-scrollbar { height: 6px; }
@@ -149,7 +146,7 @@ button { cursor: pointer; }
 .link-url-input { height: 34px; min-width: 0; flex: 1; font-size: 12px; }
 .link-apply-button { height: 34px; white-space: nowrap; }
 .page-bottom-spacer { height: 70px; }
-.statusbar { display: flex; min-height: 42px; flex: 0 0 42px; align-items: center; justify-content: space-between; padding: 0 22px; border-top: 1px solid #26232c; background: #151419; color: #918b99; font-size: 12px; }
+.statusbar { position: relative; display: flex; min-height: 42px; flex: 0 0 42px; align-items: center; justify-content: space-between; padding: 0 22px; border-top: 1px solid #26232c; background: #151419; color: #918b99; font-size: 12px; }
 .status-left, .status-right, .status-left > span, .status-right > span { display: flex; align-items: center; gap: 7px; }
 .status-divider { width: 1px; height: 12px; margin: 0 3px; background: #35313a; }
 .status-purple-dot { width: 5px; height: 5px; border-radius: 50%; background: #a082e7; }
