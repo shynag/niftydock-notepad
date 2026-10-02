@@ -500,8 +500,8 @@ export function NotepadApp({ initialSlug }: { initialSlug?: string }) {
             </div>
           </div>
           <div className="topbar-right">
-            <Button variant="ghost" size="sm" className="new-note-button" onClick={createNote} disabled={!isHydrated}><Plus size={15} /><span>New note</span></Button>
-            <Button variant="subtle" size="sm" className="share-button" onClick={copyLink} disabled={!isHydrated}>{copied ? <Check size={14} /> : <Share2 size={14} />}<span>{copied ? "Copied" : copyFailed ? "Copy failed" : "Share"}</span></Button>
+            <Button variant="ghost" size="default" className="share-button" onClick={copyLink} disabled={!isHydrated}>{copied ? <Check size={17} /> : <Share2 size={17} />}<span>{copied ? "Copied" : copyFailed ? "Copy failed" : "Share"}</span></Button>
+            <Button variant="subtle" size="default" className="new-note-button" onClick={createNote} disabled={!isHydrated}><Plus size={18} /><span>New note</span></Button>
           </div>
         </header>
 

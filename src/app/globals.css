@@ -45,7 +45,7 @@ body {
   background: hsl(var(--background));
   color: hsl(var(--foreground));
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  font-size: 15px;
+  font-size: 16px;
   -webkit-font-smoothing: antialiased;
 }
 button, input { font: inherit; }
@@ -53,34 +53,39 @@ button { cursor: pointer; }
 ::selection { background: rgba(157, 123, 255, .32); color: white; }
 
 .app-shell { display: flex; width: 100%; min-height: 100dvh; overflow: hidden; background: #121116; }
-.brand-mark { position: relative; display: grid; width: 28px; height: 28px; flex: 0 0 auto; place-items: center; overflow: hidden; border: 1px solid rgba(192, 171, 255, .35); border-radius: 9px; background: linear-gradient(145deg, #9c78f6 0%, #6549b2 68%, #473473 100%); box-shadow: 0 2px 14px rgba(120, 85, 226, .22); }
-.brand-mark::before, .brand-mark::after { position: absolute; width: 12px; height: 17px; content: ""; border: 1.5px solid rgba(255,255,255,.88); border-radius: 6px 6px 5px 5px; transform: rotate(24deg); }
-.brand-mark::before { left: 5px; top: 5px; opacity: .75; }
+.brand-mark { position: relative; display: grid; width: 32px; height: 32px; flex: 0 0 auto; place-items: center; overflow: hidden; border: 1px solid rgba(192, 171, 255, .35); border-radius: 10px; background: linear-gradient(145deg, #9c78f6 0%, #6549b2 68%, #473473 100%); box-shadow: 0 2px 14px rgba(120, 85, 226, .22); }
+.brand-mark::before, .brand-mark::after { position: absolute; width: 14px; height: 19px; content: ""; border: 1.5px solid rgba(255,255,255,.88); border-radius: 6px 6px 5px 5px; transform: rotate(24deg); }
+.brand-mark::before { left: 6px; top: 6px; opacity: .75; }
 .brand-mark::after { right: 4px; bottom: 3px; border-color: #fff; background: rgba(255,255,255,.13); }
 .brand-mark span { z-index: 1; width: 4px; height: 4px; border-radius: 50%; background: white; box-shadow: 0 0 7px white; }
 .brand-copy { display: flex; flex-direction: column; gap: 1px; line-height: 1; }
-.brand-copy span:first-child { font-size: 14px; font-weight: 680; letter-spacing: -.35px; color: #f1eef8; }
-.brand-copy span:last-child { font-size: 8px; font-weight: 700; letter-spacing: 1.9px; color: #9f8acb; }
+.brand-copy span:first-child { font-size: 16px; font-weight: 680; letter-spacing: -.35px; color: #f1eef8; }
+.brand-copy span:last-child { font-size: 9px; font-weight: 700; letter-spacing: 1.9px; color: #9f8acb; }
 .app-main { display: flex; min-width: 0; flex: 1; flex-direction: column; height: 100dvh; }
-.topbar { z-index: 5; display: flex; height: 58px; flex: 0 0 58px; align-items: center; justify-content: space-between; padding: 0 28px; border-bottom: 1px solid #25222b; background: rgba(18,17,22,.86); }
-.topbar-left, .topbar-right { display: flex; align-items: center; gap: 10px; }
-.topbar-brand { display: flex; align-items: center; gap: 10px; }
+.topbar { z-index: 5; display: flex; height: 66px; flex: 0 0 66px; align-items: center; justify-content: space-between; padding: 0 34px; border-bottom: 1px solid #25222b; background: rgba(18,17,22,.86); }
+.topbar-left, .topbar-right { display: flex; align-items: center; gap: 12px; }
+.topbar-brand { display: flex; align-items: center; gap: 12px; }
 .topbar-right { gap: 12px; }
+.topbar-right .new-note-button, .topbar-right .share-button { min-height: 36px; padding: 0 14px; border-radius: 8px; font-size: 13px; }
+.topbar-right .new-note-button svg, .topbar-right .share-button svg { width: 16px; height: 16px; }
+.share-button { order: 0; }
+.new-note-button { order: 1; }
 .save-indicator { display: flex; align-items: center; gap: 7px; color: #817b89; font-size: 11px; }
 .save-dot { width: 6px; height: 6px; border-radius: 50%; background: #70c69a; }
 .save-dot-saving { background: #b594fa; animation: pulse .75s infinite alternate; }
 @keyframes pulse { to { opacity: .35; } }
 .topbar-divider { width: 1px; height: 19px; background: #302d36; }
 .new-note-button { gap: 6px; }
-.editor-toolbar-wrap { display: flex; min-height: 58px; align-items: center; justify-content: center; border-bottom: 1px solid #25222b; background: #151419; padding: 0 22px; }
+.editor-toolbar-wrap { display: flex; min-height: 64px; align-items: center; justify-content: center; border-bottom: 1px solid #25222b; background: #151419; padding: 0 24px; }
 .editor-toolbar-wrap { scrollbar-color: #403e46 #151419; }
 .editor-toolbar-wrap::-webkit-scrollbar { height: 6px; }
 .editor-toolbar-wrap::-webkit-scrollbar-track { background: #151419; }
 .editor-toolbar-wrap::-webkit-scrollbar-thumb { border-color: #151419; background: #403e46; }
 .editor-toolbar-wrap::-webkit-scrollbar-thumb:hover { background: #5d5a64; }
-.editor-toolbar { display: flex; width: min(100%, 980px); align-items: center; gap: 9px; }
+.editor-toolbar { display: flex; width: min(100%, 1040px); align-items: center; gap: 12px; }
 .toolbar-group { display: flex; align-items: center; gap: 2px; }
-.toolbar-button { display: grid; width: 36px; height: 36px; place-items: center; border: 0; border-radius: 7px; color: #8f8997; background: transparent; transition: color .12s, background .12s; }
+.toolbar-button { display: grid; width: 42px; height: 42px; place-items: center; border: 0; border-radius: 8px; color: #8f8997; background: transparent; transition: color .12s, background .12s; }
+.toolbar-button svg { width: 18px; height: 18px; }
 .toolbar-button:hover { color: #e5def3; background: #292530; }
 .toolbar-button-active { color: #cebaff; background: rgba(151, 119, 231, .17); }
 .table-edit-controls { position: absolute; z-index: 8; display: flex; align-items: center; gap: 3px; padding: 4px; border: 1px solid #393640; border-radius: 8px; background: #211f26; box-shadow: 0 8px 24px rgba(0,0,0,.34); }
@@ -92,21 +97,21 @@ button { cursor: pointer; }
 .toolbar-separator { width: 1px; height: 19px; background: #302d36; }
 .toolbar-spacer { flex: 1; }
 .document-scroll { flex: 1; overflow: auto; scroll-behavior: smooth; }
-.document-canvas { width: min(100% - 48px, 860px); min-height: calc(100% - 20px); margin: 0 auto; padding: 72px 20px 32px; }
-.document-title { display: block; width: 100%; padding: 0; border: 0; outline: none; color: #f0edf5; background: transparent; font-size: clamp(29px, 4vw, 39px); font-weight: 650; letter-spacing: -1.45px; line-height: 1.2; }
+.document-canvas { width: min(100% - 56px, 1000px); min-height: calc(100% - 20px); margin: 0 auto; padding: 82px 26px 36px; }
+.document-title { display: block; width: 100%; padding: 0; border: 0; outline: none; color: #f0edf5; background: transparent; font-size: clamp(34px, 4.2vw, 46px); font-weight: 650; letter-spacing: -1.6px; line-height: 1.2; }
 .document-title::placeholder { color: #67616e; }
-.document-meta { margin-top: 12px; color: #797381; font-size: 11px; }
-.rich-editor { position: relative; margin-top: 37px; min-height: 420px; padding: 20px 22px; border: 1px solid #292630; border-radius: 12px; background: #17161c; color: #c5c0ca; transition: border-color .15s, background .15s; }
+.document-meta { margin-top: 14px; color: #797381; font-size: 13px; }
+.rich-editor { position: relative; margin-top: 42px; min-height: 500px; padding: 25px 28px; border: 1px solid #292630; border-radius: 14px; background: #17161c; color: #c5c0ca; transition: border-color .15s, background .15s; }
 .rich-editor:focus-within { border-color: #37333f; background: #19181f; }
-.markdown-editor-content { min-height: 420px; }
-.markdown-editor-content .tiptap { min-height: 420px; outline: none; }
-.note-prose { min-height: 300px; outline: none; color: #c5c0ca; font-size: 16px; line-height: 1.82; }
+.markdown-editor-content { min-height: 500px; }
+.markdown-editor-content .tiptap { min-height: 500px; outline: none; }
+.note-prose { min-height: 340px; outline: none; color: #c5c0ca; font-size: 18px; line-height: 1.82; }
 .note-prose > * + * { margin-top: 1.15em; }
 .note-prose p { margin: .8em 0; }
 .note-prose h1, .note-prose h2, .note-prose h3 { color: #ece8f1; font-weight: 620; letter-spacing: -.45px; line-height: 1.35; }
-.note-prose h1 { margin-top: 0; margin-bottom: .58em; font-size: 29px; }
-.note-prose h2 { margin-top: 1.75em; margin-bottom: .55em; font-size: 21px; }
-.note-prose h3 { margin-top: 1.5em; margin-bottom: .45em; font-size: 18px; }
+.note-prose h1 { margin-top: 0; margin-bottom: .58em; font-size: 34px; }
+.note-prose h2 { margin-top: 1.75em; margin-bottom: .55em; font-size: 25px; }
+.note-prose h3 { margin-top: 1.5em; margin-bottom: .45em; font-size: 21px; }
 .note-prose strong { color: #e1dce8; font-weight: 650; }
 .note-prose em { color: #d3cbdc; }
 .note-prose a { color: #b59af5; text-decoration: underline; text-decoration-color: rgba(181,154,245,.45); text-underline-offset: 3px; }
@@ -146,7 +151,7 @@ button { cursor: pointer; }
 .link-url-input { height: 34px; min-width: 0; flex: 1; font-size: 12px; }
 .link-apply-button { height: 34px; white-space: nowrap; }
 .page-bottom-spacer { height: 70px; }
-.statusbar { position: relative; display: flex; min-height: 42px; flex: 0 0 42px; align-items: center; justify-content: space-between; padding: 0 22px; border-top: 1px solid #26232c; background: #151419; color: #918b99; font-size: 12px; }
+.statusbar { position: relative; display: flex; min-height: 48px; flex: 0 0 48px; align-items: center; justify-content: space-between; padding: 0 26px; border-top: 1px solid #26232c; background: #151419; color: #918b99; font-size: 13px; }
 .status-left, .status-right, .status-left > span, .status-right > span { display: flex; align-items: center; gap: 7px; }
 .status-divider { width: 1px; height: 12px; margin: 0 3px; background: #35313a; }
 .status-purple-dot { width: 5px; height: 5px; border-radius: 50%; background: #a082e7; }
@@ -166,33 +171,41 @@ button { cursor: pointer; }
 
 @media (max-width: 760px) {
   .app-main { width: 100%; }
-  .topbar { height: 56px; flex-basis: 56px; padding: 0 14px; }
+  .topbar { height: 62px; flex-basis: 62px; padding: 0 16px; }
   .topbar-left, .topbar-right { gap: 5px; }
+  .topbar-right .new-note-button, .topbar-right .share-button { min-height: 36px; padding: 0 10px; font-size: 12px; }
+  .share-button { height: 31px; padding: 0 9px; }
+  .new-note-button { height: 31px; padding: 0 8px; }
   .save-indicator { font-size: 0; gap: 0; }
   .save-dot { width: 7px; height: 7px; }
   .topbar-divider { margin: 0 4px; }
   .share-button { height: 31px; padding: 0 9px; }
   .new-note-button { height: 31px; padding: 0 8px; }
-  .editor-toolbar-wrap { min-height: 53px; justify-content: flex-start; overflow-x: auto; padding: 0 11px; }
+  .editor-toolbar-wrap { min-height: 59px; justify-content: flex-start; overflow-x: auto; padding: 0 12px; }
   .editor-toolbar { width: max-content; min-width: 100%; gap: 7px; }
-  .toolbar-button { width: 34px; height: 34px; }
-  .document-canvas { width: min(100% - 28px, 640px); padding: 52px 4px 28px; }
-  .document-title { font-size: 31px; }
-  .rich-editor { margin-top: 29px; padding: 16px 15px; }
+  .toolbar-button { width: 38px; height: 38px; }
+  .document-canvas { width: min(100% - 32px, 700px); padding: 60px 5px 30px; }
+  .document-title { font-size: 33px; }
+  .document-meta { font-size: 12px; }
+  .rich-editor { margin-top: 32px; min-height: 440px; padding: 19px 17px; }
+  .markdown-editor-content, .markdown-editor-content .tiptap { min-height: 440px; }
   .table-edit-controls { gap: 1px; padding: 3px; }
   .table-edit-button { min-width: 48px; height: 27px; gap: 3px; padding: 0 4px; font-size: 9px; }
   .page-bottom-spacer { height: 24px; }
   .skeleton-title { height: 34px; }
-  .skeleton-editor-panel { min-height: 360px; margin-top: 29px; padding: 16px 15px; }
-  .note-prose { font-size: 15px; }
-  .statusbar { min-height: 38px; flex-basis: 38px; padding: 0 13px; font-size: 11px; }
+  .skeleton-editor-panel { min-height: 440px; margin-top: 32px; padding: 19px 17px; }
+  .note-prose { font-size: 16px; }
+  .note-prose h1 { font-size: 30px; }
+  .note-prose h2 { font-size: 23px; }
+  .note-prose h3 { font-size: 20px; }
+  .statusbar { min-height: 42px; flex-basis: 42px; padding: 0 15px; font-size: 12px; }
   .status-left { gap: 7px; }
   .status-right > span:last-child { display: none; }
   .status-divider { margin: 0 1px; }
 }
 
 @media (max-width: 420px) {
-  .document-title { font-size: 28px; }
+  .document-title { font-size: 30px; }
   .new-note-button span { display: none; }
-  .new-note-button { width: 34px; padding: 0; justify-content: center; }
+  .topbar-right .new-note-button { width: 36px; min-width: 36px; padding: 0; justify-content: center; }
 }
