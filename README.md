@@ -71,9 +71,10 @@ Anyone with a note URL can read and edit that note. NiftyDock Notepad currently 
 
 ## How it works
 
-- Opening `/` creates a note and redirects to its random slug URL, such as `/9yj63z`.
-- Opening a slug URL loads that note from the server. Unknown slugs create a new note at that URL.
-- The browser saves edits automatically through the app's API routes.
+- Opening `/` creates a local draft and redirects to its random slug URL, such as `/9yj63z`. Empty drafts are kept in browser storage and do not create database rows.
+- Opening a slug URL loads a saved note from the server. If the slug has no saved note, it opens as a local draft.
+- The first title or content edit saves the note to Supabase; later edits save automatically through the app's API routes.
+- Sharing an unsaved draft saves it first, then copies its URL.
 - The server uses the Supabase secret key to access Postgres. The browser uses the publishable key to subscribe to Realtime updates.
 - Realtime broadcasts contain note metadata, not note contents. The receiving device fetches the latest note from the API.
 

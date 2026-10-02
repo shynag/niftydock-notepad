@@ -185,40 +185,35 @@ export function NotepadApp({ initialSlug }: { initialSlug?: string }) {
         // Invalid local cache is ignored; Supabase remains the source of truth.
       }
 
-      const requestedSlug = initialSlug
-        ? normalizeNoteSlug(initialSlug)
-        : normalizeNoteSlug(window.location.pathname.slice(1));
+      const requestedSlug = initialSlug ? normalizeNoteSlug(initialSlug) : "";
       const cachedNote = requestedSlug ? stored.find((note) => note.slug === requestedSlug) : undefined;
       let loadedNote: Note | null = null;
       let loadError = false;
 
       try {
         if (!requestedSlug) {
-          const response = await fetch("/api/notes", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ title: "New note", content: "" }),
-          });
-          if (!response.ok) throw new Error("Could not create a new note.");
-          const result = await response.json();
-          loadedNote = fromApiNote(result.note as ApiNote);
+          loadedNote = {
+            id: `local-${Date.now()}`,
+            title: "New note",
+            slug: createRandomSlug(stored.map((note) => note.slug)),
+            content: "",
+            updatedAt: Date.now(),
+            version: 0,
+          };
         } else {
-          let response = await fetch(`/api/notes/${encodeURIComponent(requestedSlug)}`, { cache: "no-store" });
+          const response = await fetch(`/api/notes/${encodeURIComponent(requestedSlug)}`, { cache: "no-store" });
           if (response.status === 404) {
-            response = await fetch("/api/notes", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                slug: requestedSlug,
-                title: cachedNote?.title ?? "New note",
-                content: cachedNote?.content ?? "",
-              }),
-            });
-            if (response.status === 409) {
-              response = await fetch(`/api/notes/${encodeURIComponent(requestedSlug)}`, { cache: "no-store" });
-            }
-          }
-          if (!response.ok) {
+            loadedNote = cachedNote
+              ? { ...cachedNote, version: 0 }
+              : {
+                  id: `local-${Date.now()}`,
+                  title: "New note",
+                  slug: requestedSlug,
+                  content: "",
+                  updatedAt: Date.now(),
+                  version: 0,
+                };
+          } else if (!response.ok) {
             throw new Error("Could not load the note.");
           } else {
             const result = await response.json();
@@ -244,8 +239,16 @@ export function NotepadApp({ initialSlug }: { initialSlug?: string }) {
       if (loadedNote.version > 0) {
         versionsRef.current[loadedNote.slug] = loadedNote.version;
         lastSavedRef.current[loadedNote.slug] = JSON.stringify([loadedNote.title, loadedNote.content]);
+      } else {
+        delete versionsRef.current[loadedNote.slug];
+        const fingerprint = JSON.stringify([loadedNote.title, loadedNote.content]);
+        if (loadedNote.title === "New note" && loadedNote.content === "") {
+          lastSavedRef.current[loadedNote.slug] = fingerprint;
+        } else {
+          delete lastSavedRef.current[loadedNote.slug];
+        }
       }
-      setSaveState(loadError ? "error" : "saved");
+      setSaveState(loadError && loadedNote.version > 0 ? "error" : "saved");
       setRealtimeState("connecting");
       if (!requestedSlug) window.history.replaceState(null, "", `/${encodeURIComponent(loadedNote.slug)}`);
       setHydratedRoute(routeKey);
@@ -270,51 +273,60 @@ export function NotepadApp({ initialSlug }: { initialSlug?: string }) {
   const storedContent = selected?.content;
   const selectedContent = typeof storedContent === "string" ? storedContent : "";
 
+  const persistNote = useCallback((note: Note, force = false) => {
+    const task = saveQueueRef.current.then(async () => {
+      const latestNote = notesRef.current.find((current) => current.slug === note.slug) ?? note;
+      const fingerprint = JSON.stringify([latestNote.title, latestNote.content]);
+      const version = versionsRef.current[latestNote.slug] ?? latestNote.version;
+      if (version > 0 && lastSavedRef.current[latestNote.slug] === fingerprint) return;
+      if (version === 0 && !force && lastSavedRef.current[latestNote.slug] === fingerprint) return;
+
+      setSaveState("saving");
+      pendingSavesRef.current[latestNote.slug] = true;
+      try {
+        const response = version > 0
+          ? await fetch(`/api/notes/${encodeURIComponent(latestNote.slug)}`, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ title: latestNote.title, content: latestNote.content, version }),
+            })
+          : await fetch("/api/notes", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ slug: latestNote.slug, title: latestNote.title, content: latestNote.content }),
+            });
+
+        if (!response.ok) throw new Error("Could not save the note.");
+        const result = await response.json();
+        const savedNote = fromApiNote(result.note as ApiNote);
+        versionsRef.current[savedNote.slug] = savedNote.version;
+        lastSavedRef.current[savedNote.slug] = JSON.stringify([savedNote.title, savedNote.content]);
+        setNotes((current) => current.map((currentNote) => currentNote.slug === savedNote.slug
+          ? { ...currentNote, id: savedNote.id, version: savedNote.version, updatedAt: savedNote.updatedAt }
+          : currentNote));
+        setSaveState("saved");
+      } finally {
+        delete pendingSavesRef.current[latestNote.slug];
+      }
+    });
+    saveQueueRef.current = task.catch(() => undefined);
+    return task;
+  }, []);
+
   useEffect(() => {
     if (!isHydrated || !selected) return;
     const fingerprint = JSON.stringify([selected.title, selectedContent]);
     if (lastSavedRef.current[selected.slug] === fingerprint) return;
 
     const timeout = window.setTimeout(() => {
-      setSaveState("saving");
-      saveQueueRef.current = saveQueueRef.current
-        .then(async () => {
-          const version = versionsRef.current[selected.slug] ?? selected.version;
-          pendingSavesRef.current[selected.slug] = true;
-          try {
-            const response = version > 0
-              ? await fetch(`/api/notes/${encodeURIComponent(selected.slug)}`, {
-                  method: "PATCH",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ title: selected.title, content: selectedContent, version }),
-                })
-              : await fetch("/api/notes", {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ slug: selected.slug, title: selected.title, content: selectedContent }),
-                });
-
-            if (!response.ok) throw new Error("Could not save the note.");
-            const result = await response.json();
-            const savedNote = fromApiNote(result.note as ApiNote);
-            versionsRef.current[savedNote.slug] = savedNote.version;
-            lastSavedRef.current[savedNote.slug] = JSON.stringify([savedNote.title, savedNote.content]);
-            setNotes((current) => current.map((note) => note.slug === savedNote.slug
-              ? { ...note, id: savedNote.id, version: savedNote.version, updatedAt: savedNote.updatedAt }
-              : note));
-            setSaveState("saved");
-          } finally {
-            delete pendingSavesRef.current[selected.slug];
-          }
-        })
-        .catch(() => setSaveState("error"));
+      void persistNote(selected).catch(() => setSaveState("error"));
     }, 650);
 
     return () => window.clearTimeout(timeout);
-  }, [isHydrated, selected, selectedContent]);
+  }, [isHydrated, persistNote, selected, selectedContent]);
 
   useEffect(() => {
-    if (!isHydrated || !selected?.slug) {
+    if (!isHydrated || !selected?.slug || selected.version <= 0) {
       setRealtimeState("offline");
       return;
     }
@@ -380,7 +392,7 @@ export function NotepadApp({ initialSlug }: { initialSlug?: string }) {
       setRealtimeState("offline");
       void supabase.removeChannel(channel);
     };
-  }, [isHydrated, selected?.slug]);
+  }, [isHydrated, selected?.slug, selected?.version]);
 
   const updateContent = useCallback((markdown: unknown) => {
     const content = typeof markdown === "string" ? markdown : "";
@@ -427,40 +439,32 @@ export function NotepadApp({ initialSlug }: { initialSlug?: string }) {
     setLinkEditorOpen(false);
   };
 
-  const createNote = async () => {
+  const createNote = () => {
     const now = Date.now();
-    setSaveState("saving");
-    let note: Note;
-    try {
-      const response = await fetch("/api/notes", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: "New note", content: "" }),
-      });
-      if (!response.ok) throw new Error("Could not create the note.");
-      const result = await response.json();
-      note = fromApiNote(result.note as ApiNote);
-      versionsRef.current[note.slug] = note.version;
-      lastSavedRef.current[note.slug] = JSON.stringify([note.title, note.content]);
-      setSaveState("saved");
-    } catch {
-      const slug = createRandomSlug(notes.map((item) => item.slug));
-      note = {
-        id: `offline-${now}-${slug}`,
-        title: "New note",
-        slug,
-        content: "",
-        updatedAt: now,
-        version: 0,
-      };
-      setSaveState("error");
-    }
+    const slug = createRandomSlug(notesRef.current.map((item) => item.slug));
+    const note: Note = {
+      id: `local-${now}-${slug}`,
+      title: "New note",
+      slug,
+      content: "",
+      updatedAt: now,
+      version: 0,
+    };
+    lastSavedRef.current[slug] = JSON.stringify([note.title, note.content]);
+    setSaveState("saved");
     setNotes((current) => [note, ...current]);
     setSelectedId(note.id);
     window.history.replaceState(null, "", `/${encodeURIComponent(note.slug)}`);
   };
 
   const copyLink = async () => {
+    try {
+      await persistNote(selected, selected.version === 0);
+    } catch {
+      setSaveState("error");
+      return;
+    }
+
     const url = `${window.location.origin}/${encodeURIComponent(selected.slug)}`;
     try {
       await navigator.clipboard.writeText(url);
@@ -559,11 +563,11 @@ export function NotepadApp({ initialSlug }: { initialSlug?: string }) {
         </div>}
 
         <div className="statusbar" role="status" aria-label="Note status">
-          <div className="status-left"><span><span className="status-purple-dot" />{!isHydrated ? "Loading note..." : saveState === "saving" ? "Saving" : saveState === "error" ? "Save failed" : "Saved to Supabase"}</span></div>
+          <div className="status-left"><span><span className="status-purple-dot" />{!isHydrated ? "Loading note..." : saveState === "saving" ? "Saving" : saveState === "error" ? "Save failed" : selected.version > 0 ? "Saved to Supabase" : "Saved on this device"}</span></div>
           <div className="status-right">
             <span>{isHydrated ? `${wordCount(selectedContent)} words` : "— words"}</span>
             <span className="status-divider" />
-            <span>{realtimeState === "connected" ? "Live active" : realtimeState === "connecting" ? "Connecting..." : "Live disconnected"}</span>
+            <span>{selected.version === 0 ? "Live after first save" : realtimeState === "connected" ? "Live active" : realtimeState === "connecting" ? "Connecting..." : "Live disconnected"}</span>
           </div>
         </div>
       </section>
