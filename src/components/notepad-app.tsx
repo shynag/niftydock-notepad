@@ -151,6 +151,7 @@ export function NotepadApp({ initialSlug }: { initialSlug?: string }) {
   const [hydratedRoute, setHydratedRoute] = useState<string | null>(null);
   const isHydrated = hydratedRoute === routeKey;
   const [saveState, setSaveState] = useState<SaveState>("saved");
+  const [conflictError, setConflictError] = useState<string | null>(null);
   const [realtimeState, setRealtimeState] = useState<"connecting" | "connected" | "offline">("connecting");
   const [copied, setCopied] = useState(false);
   const [copyFailed, setCopyFailed] = useState(false);
@@ -269,6 +270,22 @@ export function NotepadApp({ initialSlug }: { initialSlug?: string }) {
     }
   }, [isHydrated, notes]);
 
+  useEffect(() => {
+    const handlePopState = () => {
+      const pathSlug = window.location.pathname.replace(/^\/+/, "");
+      if (pathSlug) {
+        const found = notesRef.current.find((n) => n.slug === pathSlug);
+        if (found) {
+          setSelectedId(found.id);
+        } else {
+          window.location.reload();
+        }
+      }
+    };
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
+
   const selected = notes.find((note) => note.id === selectedId) ?? notes[0];
   const storedContent = selected?.content;
   const selectedContent = typeof storedContent === "string" ? storedContent : "";
@@ -296,6 +313,12 @@ export function NotepadApp({ initialSlug }: { initialSlug?: string }) {
               body: JSON.stringify({ slug: latestNote.slug, title: latestNote.title, content: latestNote.content }),
             });
 
+        if (response.status === 409) {
+          setConflictError("This note changed on another device. Reload to see the latest version.");
+          setSaveState("error");
+          return;
+        }
+
         if (!response.ok) throw new Error("Could not save the note.");
         const result = await response.json();
         const savedNote = fromApiNote(result.note as ApiNote);
@@ -304,7 +327,15 @@ export function NotepadApp({ initialSlug }: { initialSlug?: string }) {
         setNotes((current) => current.map((currentNote) => currentNote.slug === savedNote.slug
           ? { ...currentNote, id: savedNote.id, version: savedNote.version, updatedAt: savedNote.updatedAt }
           : currentNote));
+        setSelectedId((currentSelectedId) => {
+          const currentSelected = notesRef.current.find((n) => n.id === currentSelectedId);
+          if (currentSelected?.slug === savedNote.slug) {
+            return savedNote.id;
+          }
+          return currentSelectedId;
+        });
         setSaveState("saved");
+        setConflictError(null);
       } finally {
         delete pendingSavesRef.current[latestNote.slug];
       }
@@ -325,8 +356,9 @@ export function NotepadApp({ initialSlug }: { initialSlug?: string }) {
     return () => window.clearTimeout(timeout);
   }, [isHydrated, persistNote, selected, selectedContent]);
 
+  const isSaved = (selected?.version ?? 0) > 0;
   useEffect(() => {
-    if (!isHydrated || !selected?.slug || selected.version <= 0) {
+    if (!isHydrated || !selected?.slug || !isSaved) {
       setRealtimeState("offline");
       return;
     }
@@ -392,15 +424,15 @@ export function NotepadApp({ initialSlug }: { initialSlug?: string }) {
       setRealtimeState("offline");
       void supabase.removeChannel(channel);
     };
-  }, [isHydrated, selected?.slug, selected?.version]);
+  }, [isHydrated, selected?.slug, isSaved]);
 
   const updateContent = useCallback((markdown: unknown) => {
     const content = typeof markdown === "string" ? markdown : "";
     const updatedAt = Date.now();
     setNotes((current) => {
-      return current.map((note) => note.id === selectedId ? { ...note, content, updatedAt } : note);
+      return current.map((note) => (note.id === selectedId || (selected?.slug && note.slug === selected.slug)) ? { ...note, content, updatedAt } : note);
     });
-  }, [selectedId]);
+  }, [selectedId, selected?.slug]);
 
   const applyMarkdown = (operation: "h1" | "h2" | "bold" | "italic" | "bullet" | "ordered" | "checklist" | "quote" | "code" | "table") => {
     if (!editor) return;
@@ -440,6 +472,13 @@ export function NotepadApp({ initialSlug }: { initialSlug?: string }) {
   };
 
   const createNote = () => {
+    if (selected) {
+      const currentFingerprint = JSON.stringify([selected.title, selectedContent]);
+      if (lastSavedRef.current[selected.slug] !== currentFingerprint) {
+        void persistNote(selected, selected.version === 0);
+      }
+    }
+
     const now = Date.now();
     const slug = createRandomSlug(notesRef.current.map((item) => item.slug));
     const note: Note = {
@@ -452,9 +491,10 @@ export function NotepadApp({ initialSlug }: { initialSlug?: string }) {
     };
     lastSavedRef.current[slug] = JSON.stringify([note.title, note.content]);
     setSaveState("saved");
+    setConflictError(null);
     setNotes((current) => [note, ...current]);
     setSelectedId(note.id);
-    window.history.replaceState(null, "", `/${encodeURIComponent(note.slug)}`);
+    window.history.pushState(null, "", `/${encodeURIComponent(note.slug)}`);
   };
 
   const copyLink = async () => {
@@ -549,21 +589,43 @@ export function NotepadApp({ initialSlug }: { initialSlug?: string }) {
                 const title = event.target.value;
                 const updatedAt = Date.now();
                 setNotes((current) => {
-                  return current.map((note) => note.id === selectedId ? { ...note, title, updatedAt } : note);
+                  return current.map((note) => (note.id === selectedId || (selected?.slug && note.slug === selected.slug)) ? { ...note, title, updatedAt } : note);
                 });
               }}
               placeholder="Untitled note"
             />
             <div className="document-meta">{isHydrated ? `Last edited ${formatDate(selected.updatedAt).toLowerCase()}` : "Last edited"}</div>
             <div className="rich-editor">
-              <RichEditor key={selected.id} value={selectedContent} onChange={updateContent} onEditorReady={setEditor} />
+              <RichEditor key={selected.slug || selected.id} value={selectedContent} onChange={updateContent} onEditorReady={setEditor} />
             </div>
           </article>
           <div className="page-bottom-spacer" />
         </div>}
 
         <div className="statusbar" role="status" aria-label="Note status">
-          <div className="status-left"><span><span className="status-purple-dot" />{!isHydrated ? "Loading note..." : saveState === "saving" ? "Saving" : saveState === "error" ? "Save failed" : selected.version > 0 ? "Saved to Supabase" : "Saved on this device"}</span></div>
+          <div className="status-left">
+            <span>
+              <span className={cn("status-purple-dot", (saveState === "error" || conflictError) && "bg-destructive")} />
+              {!isHydrated
+                ? "Loading note..."
+                : saveState === "saving"
+                ? "Saving"
+                : saveState === "error"
+                ? conflictError || "Save failed"
+                : selected.version > 0
+                ? "Saved to Supabase"
+                : "Saved on this device"}
+            </span>
+            {conflictError && (
+              <button
+                type="button"
+                className="ml-2 underline text-xs text-[#cebaff] hover:text-white"
+                onClick={() => window.location.reload()}
+              >
+                Reload
+              </button>
+            )}
+          </div>
           <div className="status-right">
             <span>{isHydrated ? `${wordCount(selectedContent)} words` : "— words"}</span>
             <span className="status-divider" />

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { Editor } from "@tiptap/core";
 import { EditorContent, useEditor } from "@tiptap/react";
 import { Minus, Plus, Trash2 } from "lucide-react";
@@ -22,31 +22,44 @@ type TableControlsPosition = { top: number; left: number };
 
 export function RichEditor({ value, onChange, onEditorReady }: RichEditorProps) {
   const [tableControlsPosition, setTableControlsPosition] = useState<TableControlsPosition | null>(null);
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
+  const lastEmittedMarkdownRef = useRef(value);
+
   const updateTableControlsPosition = useCallback((currentEditor: Editor | null) => {
     if (!currentEditor?.isActive("table")) {
       setTableControlsPosition(null);
       return;
     }
 
-    const position = currentEditor.state.selection.from;
-    const selectedNode = currentEditor.view.domAtPos(position).node;
-    const selectedElement = selectedNode.nodeType === 1
-      ? selectedNode as Element
-      : selectedNode.parentElement;
-    const table = selectedElement?.closest("table");
-    const container = currentEditor.view.dom.closest(".rich-editor");
-    if (!table || !container) {
-      setTableControlsPosition(null);
-      return;
-    }
+    try {
+      const position = currentEditor.state.selection.from;
+      const selectedNode = currentEditor.view.domAtPos(position).node;
+      const selectedElement = selectedNode.nodeType === 1
+        ? selectedNode as Element
+        : selectedNode.parentElement;
+      const table = selectedElement?.closest("table");
+      const container = currentEditor.view.dom.closest(".rich-editor");
+      if (!table || !container) {
+        setTableControlsPosition(null);
+        return;
+      }
 
-    const tableRect = table.getBoundingClientRect();
-    const containerRect = container.getBoundingClientRect();
-    const controlsWidth = Math.min(360, containerRect.width - 16);
-    setTableControlsPosition({
-      top: Math.max(8, tableRect.top - containerRect.top - 42),
-      left: Math.max(8, Math.min(tableRect.left - containerRect.left, containerRect.width - controlsWidth - 8)),
-    });
+      const tableRect = table.getBoundingClientRect();
+      const containerRect = container.getBoundingClientRect();
+      const controlsWidth = Math.min(360, containerRect.width - 16);
+      const newTop = Math.max(8, tableRect.top - containerRect.top - 42);
+      const newLeft = Math.max(8, Math.min(tableRect.left - containerRect.left, containerRect.width - controlsWidth - 8));
+
+      setTableControlsPosition((prev) => {
+        if (prev && Math.abs(prev.top - newTop) < 1 && Math.abs(prev.left - newLeft) < 1) {
+          return prev;
+        }
+        return { top: newTop, left: newLeft };
+      });
+    } catch {
+      setTableControlsPosition(null);
+    }
   }, []);
 
   const editor = useEditor({
@@ -75,7 +88,11 @@ export function RichEditor({ value, onChange, onEditorReady }: RichEditorProps) 
         spellcheck: "true",
       },
     },
-    onUpdate: ({ editor: currentEditor }) => onChange(currentEditor.getMarkdown()),
+    onUpdate: ({ editor: currentEditor }) => {
+      const md = currentEditor.getMarkdown();
+      lastEmittedMarkdownRef.current = md;
+      onChangeRef.current(md);
+    },
     onSelectionUpdate: ({ editor: currentEditor }) => updateTableControlsPosition(currentEditor),
   });
 
@@ -100,7 +117,9 @@ export function RichEditor({ value, onChange, onEditorReady }: RichEditorProps) 
   }, [editor, updateTableControlsPosition]);
 
   useEffect(() => {
-    if (!editor || editor.getMarkdown() === value) return;
+    if (!editor) return;
+    if (value === lastEmittedMarkdownRef.current) return;
+    lastEmittedMarkdownRef.current = value;
     const selection = editor.state.selection;
     editor.commands.setContent(value, { contentType: "markdown", emitUpdate: false });
     if (editor.isFocused) {
