@@ -6,6 +6,7 @@ import {
   Bold,
   Check,
   Code2,
+  FileCode2,
   Heading1,
   Heading2,
   Italic,
@@ -90,11 +91,6 @@ function formatDate(timestamp: number) {
   return date.toLocaleDateString("en-US", { day: "numeric", month: "short" });
 }
 
-function wordCount(value: unknown) {
-  const text = typeof value === "string" ? value : "";
-  return text.trim().split(/\s+/).filter(Boolean).length;
-}
-
 function normalizeNoteSlug(slug: string) {
   return slug.replace(/^catatan-([a-z0-9]{6})$/i, "$1");
 }
@@ -155,6 +151,8 @@ export function NotepadApp({ initialSlug }: { initialSlug?: string }) {
   const [realtimeState, setRealtimeState] = useState<"connecting" | "connected" | "offline">("connecting");
   const [copied, setCopied] = useState(false);
   const [copyFailed, setCopyFailed] = useState(false);
+  const [characterCount, setCharacterCount] = useState(0);
+  const [sourceMode, setSourceMode] = useState(false);
   const [editor, setEditor] = useState<Editor | null>(null);
   const [linkEditorOpen, setLinkEditorOpen] = useState(false);
   const [linkUrl, setLinkUrl] = useState("");
@@ -516,13 +514,20 @@ export function NotepadApp({ initialSlug }: { initialSlug?: string }) {
     }
   };
 
+  const toggleSourceMode = () => {
+    const nextSourceMode = !sourceMode;
+    setLinkEditorOpen(false);
+    setSourceMode(nextSourceMode);
+    if (!nextSourceMode) window.requestAnimationFrame(() => editor?.commands.focus());
+  };
+
   const ToolbarButton = ({ label, onClick, children, active = false, disabled = false }: { label: string; onClick: () => void; children: React.ReactNode; active?: boolean; disabled?: boolean }) => (
     <button
       type="button"
       title={label}
       aria-label={label}
       aria-pressed={active}
-      disabled={disabled || !isHydrated}
+      disabled={disabled || !isHydrated || sourceMode}
       onMouseDown={(event) => event.preventDefault()}
       onClick={() => {
         onClick();
@@ -568,13 +573,24 @@ export function NotepadApp({ initialSlug }: { initialSlug?: string }) {
               </div>
             </div>
             <span className="toolbar-separator" />
-            <div className="toolbar-group">
+            <div className="toolbar-group toolbar-group-last">
               <ToolbarButton label="Bulleted list" onClick={() => applyMarkdown("bullet")} active={!!editor?.isActive("bulletList")}><List size={16} /></ToolbarButton>
               <ToolbarButton label="Numbered list" onClick={() => applyMarkdown("ordered")} active={!!editor?.isActive("orderedList")}><ListOrdered size={16} /></ToolbarButton>
               <ToolbarButton label="Checklist" onClick={() => applyMarkdown("checklist")} active={!!editor?.isActive("taskList")}><ListChecks size={16} /></ToolbarButton>
               <ToolbarButton label="Block quote" onClick={() => applyMarkdown("quote")} active={!!editor?.isActive("blockquote")}><Quote size={15} /></ToolbarButton>
               <ToolbarButton label="Code block" onClick={() => applyMarkdown("code")} active={!!editor?.isActive("codeBlock")}><Code2 size={15} /></ToolbarButton>
               <ToolbarButton label="Table" onClick={() => applyMarkdown("table")}><Table2 size={15} /></ToolbarButton>
+              <span className="toolbar-separator" />
+              <button
+                type="button"
+                title={sourceMode ? "Switch to visual editor" : "Switch to Markdown source"}
+                aria-label={sourceMode ? "Switch to visual editor" : "Switch to Markdown source"}
+                aria-pressed={sourceMode}
+                disabled={!isHydrated}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={toggleSourceMode}
+                className={cn("toolbar-button", "source-mode-toggle", sourceMode && "toolbar-button-active")}
+              ><FileCode2 size={16} /></button>
             </div>
           </div>
         </div>
@@ -596,7 +612,7 @@ export function NotepadApp({ initialSlug }: { initialSlug?: string }) {
             />
             <div className="document-meta">{isHydrated ? `Last edited ${formatDate(selected.updatedAt).toLowerCase()}` : "Last edited"}</div>
             <div className="rich-editor">
-              <RichEditor key={selected.slug || selected.id} value={selectedContent} onChange={updateContent} onEditorReady={setEditor} />
+              <RichEditor key={selected.slug || selected.id} value={selectedContent} sourceMode={sourceMode} onChange={updateContent} onPlainTextChange={(text) => setCharacterCount(Array.from(text).length)} onEditorReady={setEditor} />
             </div>
           </article>
           <div className="page-bottom-spacer" />
@@ -627,7 +643,7 @@ export function NotepadApp({ initialSlug }: { initialSlug?: string }) {
             )}
           </div>
           <div className="status-right">
-            <span>{isHydrated ? `${wordCount(selectedContent)} words` : "— words"}</span>
+            <span>{isHydrated ? `${characterCount} characters` : "— characters"}</span>
             <span className="status-divider" />
             <span>{selected.version === 0 ? "Live after first save" : realtimeState === "connected" ? "Live active" : realtimeState === "connecting" ? "Connecting..." : "Live disconnected"}</span>
           </div>

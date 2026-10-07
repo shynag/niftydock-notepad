@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Editor } from "@tiptap/core";
 import { EditorContent, useEditor } from "@tiptap/react";
-import { Minus, Plus, Trash2 } from "lucide-react";
+import { Ellipsis, Plus, Trash2 } from "lucide-react";
 import StarterKit from "@tiptap/starter-kit";
 import { Markdown } from "@tiptap/markdown";
 import Link from "@tiptap/extension-link";
@@ -14,16 +14,22 @@ import TaskList from "@tiptap/extension-task-list";
 
 type RichEditorProps = {
   value: string;
+  sourceMode: boolean;
   onChange: (value: string) => void;
+  onPlainTextChange: (value: string) => void;
   onEditorReady: (editor: Editor | null) => void;
 };
 
 type TableControlsPosition = { top: number; left: number };
 
-export function RichEditor({ value, onChange, onEditorReady }: RichEditorProps) {
+export function RichEditor({ value, sourceMode, onChange, onPlainTextChange, onEditorReady }: RichEditorProps) {
   const [tableControlsPosition, setTableControlsPosition] = useState<TableControlsPosition | null>(null);
+  const [tableMenuOpen, setTableMenuOpen] = useState(false);
+  const tableControlsRef = useRef<HTMLDivElement>(null);
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
+  const onPlainTextChangeRef = useRef(onPlainTextChange);
+  onPlainTextChangeRef.current = onPlainTextChange;
   const lastEmittedMarkdownRef = useRef(value);
 
   const updateTableControlsPosition = useCallback((currentEditor: Editor | null) => {
@@ -47,9 +53,9 @@ export function RichEditor({ value, onChange, onEditorReady }: RichEditorProps) 
 
       const tableRect = table.getBoundingClientRect();
       const containerRect = container.getBoundingClientRect();
-      const controlsWidth = Math.min(360, containerRect.width - 16);
-      const newTop = Math.max(8, tableRect.top - containerRect.top - 42);
-      const newLeft = Math.max(8, Math.min(tableRect.left - containerRect.left, containerRect.width - controlsWidth - 8));
+      const controlsSize = 34;
+      const newTop = Math.max(8, tableRect.top - containerRect.top - 17);
+      const newLeft = Math.max(8, Math.min(tableRect.right - containerRect.left - controlsSize, containerRect.width - controlsSize - 8));
 
       setTableControlsPosition((prev) => {
         if (prev && Math.abs(prev.top - newTop) < 1 && Math.abs(prev.left - newLeft) < 1) {
@@ -61,6 +67,27 @@ export function RichEditor({ value, onChange, onEditorReady }: RichEditorProps) 
       setTableControlsPosition(null);
     }
   }, []);
+
+  useEffect(() => {
+    if (!tableMenuOpen) return;
+
+    const closeOnOutsideClick = (event: PointerEvent) => {
+      if (!tableControlsRef.current?.contains(event.target as Node)) setTableMenuOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setTableMenuOpen(false);
+    };
+    document.addEventListener("pointerdown", closeOnOutsideClick);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsideClick);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [tableMenuOpen]);
+
+  useEffect(() => {
+    if (sourceMode) setTableMenuOpen(false);
+  }, [sourceMode]);
 
   const editor = useEditor({
     immediatelyRender: false,
@@ -92,8 +119,15 @@ export function RichEditor({ value, onChange, onEditorReady }: RichEditorProps) 
       const md = currentEditor.getMarkdown();
       lastEmittedMarkdownRef.current = md;
       onChangeRef.current(md);
+      onPlainTextChangeRef.current(currentEditor.getText());
     },
-    onSelectionUpdate: ({ editor: currentEditor }) => updateTableControlsPosition(currentEditor),
+    onCreate: ({ editor: currentEditor }) => {
+      onPlainTextChangeRef.current(currentEditor.getText());
+    },
+    onSelectionUpdate: ({ editor: currentEditor }) => {
+      updateTableControlsPosition(currentEditor);
+      if (!currentEditor.isActive("table")) setTableMenuOpen(false);
+    },
   });
 
   useEffect(() => {
@@ -122,6 +156,7 @@ export function RichEditor({ value, onChange, onEditorReady }: RichEditorProps) 
     lastEmittedMarkdownRef.current = value;
     const selection = editor.state.selection;
     editor.commands.setContent(value, { contentType: "markdown", emitUpdate: false });
+    onPlainTextChangeRef.current(editor.getText());
     if (editor.isFocused) {
       const position = Math.min(selection.from, editor.state.doc.content.size);
       editor.commands.setTextSelection(position);
@@ -130,21 +165,48 @@ export function RichEditor({ value, onChange, onEditorReady }: RichEditorProps) 
 
   return (
     <>
-      <EditorContent editor={editor} className="markdown-editor-content" />
-      {editor && tableControlsPosition && <div
+      <EditorContent editor={editor} className={cnEditorContentClass(sourceMode)} />
+      {sourceMode && <textarea
+        className="markdown-source-editor"
+        aria-label="Markdown source"
+        autoFocus
+        autoCapitalize="off"
+        autoCorrect="off"
+        spellCheck={false}
+        placeholder="Write Markdown..."
+        value={value}
+        onChange={(event) => onChangeRef.current(event.target.value)}
+      />}
+      {!sourceMode && editor && tableControlsPosition && <div
+        ref={tableControlsRef}
         className="table-edit-controls"
-        role="toolbar"
-        aria-label="Kontrol tabel"
         style={{ top: tableControlsPosition.top, left: tableControlsPosition.left }}
       >
-        <TableControlButton label="Tambah baris" onClick={() => editor.chain().focus().addRowAfter().run()}><Plus size={14} /><span>Baris</span></TableControlButton>
-        <TableControlButton label="Hapus baris" onClick={() => editor.chain().focus().deleteRow().run()} disabled={!editor.can().deleteRow()}><Minus size={14} /><span>Baris</span></TableControlButton>
-        <TableControlButton label="Tambah kolom" onClick={() => editor.chain().focus().addColumnAfter().run()}><Plus size={14} /><span>Kolom</span></TableControlButton>
-        <TableControlButton label="Hapus kolom" onClick={() => editor.chain().focus().deleteColumn().run()} disabled={!editor.can().deleteColumn()}><Minus size={14} /><span>Kolom</span></TableControlButton>
-        <TableControlButton label="Hapus tabel" onClick={() => editor.chain().focus().deleteTable().run()} disabled={!editor.can().deleteTable()} destructive><Trash2 size={14} /><span>Hapus</span></TableControlButton>
+        <button
+          type="button"
+          className="table-menu-trigger"
+          title="Table options"
+          aria-label="Table options"
+          aria-haspopup="true"
+          aria-expanded={tableMenuOpen}
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={() => setTableMenuOpen((open) => !open)}
+        ><Ellipsis size={18} /></button>
+        {tableMenuOpen && <div className="table-edit-menu" role="group" aria-label="Table options">
+          <TableControlButton label="Add row after" onClick={() => { editor.chain().focus().addRowAfter().run(); setTableMenuOpen(false); }}><Plus size={15} /><span>Add row after</span></TableControlButton>
+          <TableControlButton label="Add column after" onClick={() => { editor.chain().focus().addColumnAfter().run(); setTableMenuOpen(false); }}><Plus size={15} /><span>Add column after</span></TableControlButton>
+          <span className="table-menu-separator" />
+          <TableControlButton label="Remove column" onClick={() => { editor.chain().focus().deleteColumn().run(); setTableMenuOpen(false); }} disabled={!editor.can().deleteColumn()} destructive><Trash2 size={15} /><span>Remove column</span></TableControlButton>
+          <TableControlButton label="Remove row" onClick={() => { editor.chain().focus().deleteRow().run(); setTableMenuOpen(false); }} disabled={!editor.can().deleteRow()} destructive><Trash2 size={15} /><span>Remove row</span></TableControlButton>
+          <TableControlButton label="Remove table" onClick={() => { editor.chain().focus().deleteTable().run(); setTableMenuOpen(false); }} disabled={!editor.can().deleteTable()} destructive><Trash2 size={15} /><span>Remove table</span></TableControlButton>
+        </div>}
       </div>}
     </>
   );
+}
+
+function cnEditorContentClass(sourceMode: boolean) {
+  return sourceMode ? "markdown-editor-content source-mode-hidden" : "markdown-editor-content";
 }
 
 function TableControlButton({ label, onClick, children, disabled = false, destructive = false }: {
