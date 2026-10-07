@@ -18,6 +18,8 @@ import {
   Quote,
   Share2,
   Table2,
+  Redo2,
+  Undo2,
 } from "lucide-react";
 import { RichEditor } from "@/components/rich-editor";
 import { Button } from "@/components/ui/button";
@@ -556,6 +558,11 @@ export function NotepadApp({ initialSlug }: { initialSlug?: string }) {
 
         <div className="editor-toolbar-wrap">
           <div className="editor-toolbar">
+            <div className="toolbar-group">
+              <ToolbarButton label="Undo" onClick={() => editor?.chain().focus().undo().run()} disabled={!editor?.can().undo()}><Undo2 size={16} /></ToolbarButton>
+              <ToolbarButton label="Redo" onClick={() => editor?.chain().focus().redo().run()} disabled={!editor?.can().redo()}><Redo2 size={16} /></ToolbarButton>
+            </div>
+            <span className="toolbar-separator" />
             <div className="toolbar-group">
               <ToolbarButton label="Heading 1" onClick={() => applyMarkdown("h1")} active={!!editor?.isActive("heading", { level: 1 })}><Heading1 size={16} /></ToolbarButton>
               <ToolbarButton label="Heading 2" onClick={() => applyMarkdown("h2")} active={!!editor?.isActive("heading", { level: 2 })}><Heading2 size={16} /></ToolbarButton>
