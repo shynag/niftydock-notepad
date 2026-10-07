@@ -85,6 +85,7 @@ button { cursor: pointer; }
 .editor-toolbar { display: flex; width: min(100%, 1040px); align-items: center; gap: 12px; }
 .toolbar-group { display: flex; align-items: center; gap: 2px; }
 .toolbar-group-last { flex: 0 0 auto; padding-right: 0; }
+.toolbar-group-last > .toolbar-separator { margin-inline: 10px; }
 .toolbar-button { display: grid; width: 42px; height: 42px; place-items: center; border: 0; border-radius: 8px; color: #8f8997; background: transparent; transition: color .12s, background .12s; }
 .source-mode-toggle { display: grid; width: 42px; min-width: 42px; flex: 0 0 42px; align-items: center; justify-content: center; padding: 0; }
 .toolbar-button svg { width: 18px; height: 18px; }
