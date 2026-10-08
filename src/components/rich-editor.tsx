@@ -7,8 +7,6 @@ import { Ellipsis, Plus, Trash2 } from "lucide-react";
 import Collaboration from "@tiptap/extension-collaboration";
 import * as Y from "yjs";
 import { prosemirrorJSONToYDoc } from "y-prosemirror";
-import { yCursorPlugin, yCursorPluginKey } from "@tiptap/y-tiptap";
-import { Awareness, applyAwarenessUpdate, encodeAwarenessUpdate, removeAwarenessStates } from "y-protocols/awareness";
 import { IndexeddbPersistence } from "y-indexeddb";
 import { createNoteEditorExtensions } from "@/lib/note-editor-extensions";
 import { createClient } from "@/utils/supabase/client";
@@ -41,26 +39,6 @@ function createUpdateId() {
   bytes[8] = (bytes[8] & 0x3f) | 0x80;
   const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
-}
-
-function createPresenceProfile() {
-  const bytes = new Uint8Array(3);
-  crypto.getRandomValues(bytes);
-  const colors = ["#7c9cff", "#e58ac8", "#f0a35c", "#55c5a1", "#c39aff", "#e57474"];
-  const suffix = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("").slice(0, 4).toUpperCase();
-  return { name: `Guest ${suffix}`, color: colors[bytes[0] % colors.length] };
-}
-
-function buildRemoteCursor(user: { name?: string; color?: string }) {
-  const color = user?.color ?? "#7c9cff";
-  const cursor = document.createElement("span");
-  cursor.className = "ProseMirror-yjs-cursor";
-  cursor.style.borderColor = color;
-  const label = document.createElement("div");
-  label.textContent = user?.name ?? "Guest";
-  label.style.backgroundColor = color;
-  cursor.append(label);
-  return cursor;
 }
 
 export function RichEditor({ slug, persisted, value, sourceMode, title, onChange, onTitleChange, onNoteUpdated, onPlainTextChange, onEditorReady, onCollaborationStatusChange, onFlushReady }: RichEditorProps) {
@@ -197,8 +175,9 @@ export function RichEditor({ slug, persisted, value, sourceMode, title, onChange
     let debounceTimer: number | undefined;
     let retryTimer: number | undefined;
     let fallbackSyncTimer: number | undefined;
-    let presenceTimer: number | undefined;
+    let broadcastRetryTimer: number | undefined;
     let retryDelay = 1000;
+    let broadcastRetryDelay = 2000;
     let pending: Uint8Array[] = [];
     let resolveReady: () => void = () => undefined;
     const readyPromise = new Promise<void>((resolve) => { resolveReady = resolve; });
@@ -213,6 +192,51 @@ export function RichEditor({ slug, persisted, value, sourceMode, title, onChange
       fallbackSyncTimer = window.setInterval(() => {
         if ((!channelConnected || broadcastFailed) && remoteReady) void syncFromServer();
       }, 2500);
+    };
+
+    const stopFallbackSync = () => {
+      if (fallbackSyncTimer === undefined) return;
+      window.clearInterval(fallbackSyncTimer);
+      fallbackSyncTimer = undefined;
+    };
+
+    const scheduleBroadcastRetry = (updateId: string, data: string) => {
+      if (!active || broadcastRetryTimer !== undefined) return;
+      broadcastRetryTimer = window.setTimeout(() => {
+        broadcastRetryTimer = undefined;
+        if (!active || !channel || !channelConnected) {
+          scheduleBroadcastRetry(updateId, data);
+          return;
+        }
+
+        void channel.send({
+          type: "broadcast",
+          event: "collab_update",
+          payload: data.length <= 60000 ? { id: updateId, data } : { id: updateId },
+        }).then((result) => {
+          if (!active) return;
+          if (result === "ok") {
+            broadcastFailed = false;
+            broadcastRetryDelay = 2000;
+            stopFallbackSync();
+            setStatus(pending.length || flushPromise ? "saving" : "connected");
+            return;
+          }
+
+          console.warn("Realtime broadcast retry failed:", result);
+          broadcastFailed = true;
+          startFallbackSync();
+          broadcastRetryDelay = Math.min(broadcastRetryDelay * 2, 30000);
+          scheduleBroadcastRetry(updateId, data);
+        }).catch((error: unknown) => {
+          if (!active) return;
+          console.warn("Realtime broadcast retry failed:", error);
+          broadcastFailed = true;
+          startFallbackSync();
+          broadcastRetryDelay = Math.min(broadcastRetryDelay * 2, 30000);
+          scheduleBroadcastRetry(updateId, data);
+        });
+      }, broadcastRetryDelay);
     };
 
     const markEditorReady = () => {
@@ -263,54 +287,6 @@ export function RichEditor({ slug, persisted, value, sourceMode, title, onChange
     editor.setEditable(false);
     setStatus("connecting");
 
-    const awareness = new Awareness(ydoc);
-    awareness.setLocalStateField("user", createPresenceProfile());
-    editor.registerPlugin(yCursorPlugin(awareness, { cursorBuilder: buildRemoteCursor }));
-
-    const publishPresence = async () => {
-      if (!active || !channelConnected || !channel) return;
-      try {
-        const cursor = encodeAwarenessUpdate(awareness, [awareness.clientID]);
-        await channel.track({ clientId: awareness.clientID, cursor: encodeBase64(cursor) });
-      } catch {
-        // Cursor presence is temporary; document edits continue syncing independently.
-      }
-    };
-
-    const schedulePresencePublish = (changes: { added: number[]; updated: number[]; removed: number[] }) => {
-      const localId = awareness.clientID;
-      if (![...changes.added, ...changes.updated, ...changes.removed].includes(localId) || presenceTimer !== undefined) return;
-      presenceTimer = window.setTimeout(() => {
-        presenceTimer = undefined;
-        void publishPresence();
-      }, 100);
-    };
-    awareness.on("update", schedulePresencePublish);
-
-    const syncPresence = () => {
-      if (!channel) return;
-      const activeClientIds = new Set<number>([awareness.clientID]);
-      const presenceState = channel.presenceState<{ clientId?: number; cursor?: string }>();
-      for (const entries of Object.values(presenceState)) {
-        for (const entry of entries) {
-          if (typeof entry.clientId === "number") activeClientIds.add(entry.clientId);
-          if (typeof entry.cursor !== "string") continue;
-          try {
-            applyAwarenessUpdate(awareness, decodeBase64(entry.cursor), channel);
-          } catch {
-            // Ignore malformed transient cursor state.
-          }
-        }
-      }
-      const staleClientIds = [...awareness.getStates().keys()].filter((id) => !activeClientIds.has(id));
-      if (staleClientIds.length) removeAwarenessStates(awareness, staleClientIds, channel);
-    };
-
-    const clearRemotePresence = () => {
-      const remoteClientIds = [...awareness.getStates().keys()].filter((id) => id !== awareness.clientID);
-      if (remoteClientIds.length) removeAwarenessStates(awareness, remoteClientIds, "disconnect");
-    };
-
     const scheduleRetry = () => {
       if (!active || retryTimer !== undefined) return;
       retryTimer = window.setTimeout(() => {
@@ -354,9 +330,19 @@ export function RichEditor({ slug, persisted, value, sourceMode, title, onChange
               });
               if (result !== "ok") {
                 broadcastFailed = true;
-                channelConnected = false;
                 setStatus("offline");
                 startFallbackSync();
+                console.warn("Realtime broadcast failed:", result);
+                broadcastRetryDelay = 2000;
+                scheduleBroadcastRetry(updateId, data);
+              } else {
+                broadcastFailed = false;
+                broadcastRetryDelay = 2000;
+                if (broadcastRetryTimer !== undefined) {
+                  window.clearTimeout(broadcastRetryTimer);
+                  broadcastRetryTimer = undefined;
+                }
+                stopFallbackSync();
               }
             }
           } catch {
@@ -492,7 +478,6 @@ export function RichEditor({ slug, persisted, value, sourceMode, title, onChange
       supabase = createClient();
       channel = supabase
         .channel(`note:${slug}`, { config: { private: true } })
-        .on("presence", { event: "sync" }, syncPresence)
         .on("broadcast", { event: "collab_update" }, ({ payload }) => {
           if (typeof payload?.data === "string") {
             try {
@@ -508,20 +493,24 @@ export function RichEditor({ slug, persisted, value, sourceMode, title, onChange
           const version = Number(payload?.version);
           if (Number.isFinite(version)) onNoteUpdatedRef.current(slug, version);
         })
-        .subscribe((status) => {
+        .on("system", {}, (payload) => {
+          console.warn("Supabase Realtime system message:", payload);
+        })
+        .subscribe((status, error) => {
           if (!active) return;
           if (status === "SUBSCRIBED") {
             channelConnected = true;
             broadcastFailed = false;
-            void publishPresence();
-            if (fallbackSyncTimer !== undefined) {
-              window.clearInterval(fallbackSyncTimer);
-              fallbackSyncTimer = undefined;
+            broadcastRetryDelay = 2000;
+            if (broadcastRetryTimer !== undefined) {
+              window.clearTimeout(broadcastRetryTimer);
+              broadcastRetryTimer = undefined;
             }
+            stopFallbackSync();
             void syncFromServer();
           } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
             channelConnected = false;
-            clearRemotePresence();
+            console.warn(`Supabase Realtime channel ${status.toLowerCase()}.`, error ?? { slug });
             if (remoteReady) {
               setStatus(pending.length || flushPromise ? "saving" : "offline");
               startFallbackSync();
@@ -566,10 +555,7 @@ export function RichEditor({ slug, persisted, value, sourceMode, title, onChange
       if (debounceTimer !== undefined) window.clearTimeout(debounceTimer);
       if (retryTimer !== undefined) window.clearTimeout(retryTimer);
       if (fallbackSyncTimer !== undefined) window.clearInterval(fallbackSyncTimer);
-      if (presenceTimer !== undefined) window.clearTimeout(presenceTimer);
-      awareness.off("update", schedulePresencePublish);
-      editor.unregisterPlugin(yCursorPluginKey);
-      awareness.destroy();
+      if (broadcastRetryTimer !== undefined) window.clearTimeout(broadcastRetryTimer);
       window.removeEventListener("pagehide", handlePageHide);
       flushHandlerRef.current = async () => undefined;
       onFlushReady(async () => undefined, false);

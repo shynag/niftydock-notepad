@@ -42,7 +42,7 @@ Anyone with a note URL can read and edit that note. NiftyDock Notepad currently 
    cp .env.example .env.local
    ```
 
-3. In your Supabase project, open **SQL Editor** and run the files in `supabase/migrations` in timestamp order. The migrations add Yjs collaboration storage, Realtime edit broadcasts, and temporary cursor presence for open devices.
+3. In your Supabase project, open **SQL Editor** and run the files in `supabase/migrations` in timestamp order. The migrations add Yjs collaboration storage and scoped Realtime Broadcast policies for shared notes.
 
 4. In Supabase project settings, copy the project URL, publishable key, and secret key into `.env.local`:
 
