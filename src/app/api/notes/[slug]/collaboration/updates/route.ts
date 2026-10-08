@@ -71,9 +71,10 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
   }
   if (!document) return jsonError("Collaboration document is not initialized yet.", 409);
 
-  const { error } = await supabase
-    .from("note_collaboration_updates")
-    .upsert(rows, { onConflict: "note_slug,update_id", ignoreDuplicates: true });
+  const { error } = await supabase.rpc("append_note_collaboration_updates", {
+    p_note_slug: slug,
+    p_updates: rows.map((row) => ({ id: row.update_id, data: row.update_data })),
+  });
   if (error) {
     console.error("Supabase collaboration update save failed:", error.message);
     return jsonError("Could not save collaboration updates.", 500);
