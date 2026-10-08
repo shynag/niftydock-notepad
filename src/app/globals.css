@@ -154,7 +154,8 @@ button { cursor: pointer; }
 .note-prose hr { height: 1px; border: 0; background: #322e38; }
 .note-prose .tableWrapper { display: block; width: 100%; max-width: 100%; overflow-x: auto; overscroll-behavior-x: contain; }
 .collaboration-editor-shell { position: relative; min-height: 340px; }
-.collaboration-editor-loading { position: absolute; z-index: 4; inset: 0; display: grid; place-items: center; border-radius: 10px; color: #a29ba9; background: rgba(23,22,28,.94); font-size: 14px; }
+.collaboration-editor-shell[aria-busy="true"] { min-height: 500px; }
+.collaboration-editor-loading { position: absolute; z-index: 4; inset: -26px -29px; overflow: hidden; border-radius: 13px; padding: 9px 28px; background: #17161c; }
 .note-prose table { width: max-content; min-width: 100%; border-collapse: collapse; border-radius: 6px; }
 .note-prose th, .note-prose td { min-width: 100px; padding: 8px 10px; border: 1px solid #393440; text-align: left; }
 .note-prose th { color: #e0d9ed; background: #211e28; }
@@ -212,6 +213,8 @@ button { cursor: pointer; }
   .document-meta { font-size: 12px; }
   .rich-editor { margin-top: 32px; min-height: 440px; padding: 19px 17px; }
   .markdown-editor-content, .markdown-editor-content .tiptap, .markdown-source-editor { min-height: 440px; }
+  .collaboration-editor-shell[aria-busy="true"] { min-height: 440px; }
+  .collaboration-editor-loading { inset: -20px -18px; padding: 3px 17px; }
   .table-menu-trigger { width: 32px; height: 32px; }
   .table-edit-menu { width: 190px; }
   .page-bottom-spacer { height: 24px; }
