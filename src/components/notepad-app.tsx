@@ -331,6 +331,76 @@ export function NotepadApp({ initialSlug }: { initialSlug?: string }) {
   const storedContent = selected?.content;
   const selectedContent = typeof storedContent === "string" ? storedContent : "";
 
+  useEffect(() => {
+    const draftSlug = selected?.slug;
+    if (!isHydrated || !selected || selected.version > 0 || !draftSlug) return;
+
+    let active = true;
+    let retryTimer: number | undefined;
+
+    const scheduleCheck = () => {
+      if (!active || retryTimer !== undefined) return;
+      retryTimer = window.setTimeout(() => {
+        retryTimer = undefined;
+        void checkForRemoteNote();
+      }, document.visibilityState === "visible" ? 2000 : 6000);
+    };
+
+    const checkForRemoteNote = async () => {
+      if (!active) return;
+      if (document.visibilityState !== "visible") {
+        scheduleCheck();
+        return;
+      }
+
+      try {
+        const response = await fetch(`/api/notes/${encodeURIComponent(draftSlug)}`, { cache: "no-store" });
+        if (response.ok) {
+          const result = await response.json();
+          const remoteNote = fromApiNote(result.note as ApiNote);
+          const localNote = notesRef.current.find((note) => note.slug === draftSlug);
+          if (!active || !localNote || localNote.version > 0) return;
+
+          const keepLocalTitle = lastSavedTitleRef.current[draftSlug] !== localNote.title;
+          versionsRef.current[draftSlug] = remoteNote.version;
+          if (!keepLocalTitle) lastSavedTitleRef.current[draftSlug] = remoteNote.title;
+          setNotes((current) => current.map((note) => note.slug === draftSlug
+            ? {
+                ...note,
+                id: remoteNote.id,
+                title: keepLocalTitle ? note.title : remoteNote.title,
+                version: remoteNote.version,
+                updatedAt: remoteNote.updatedAt,
+              }
+            : note));
+          setSelectedId((current) => current === localNote.id ? remoteNote.id : current);
+          return;
+        }
+      } catch {
+        // Keep checking while the device is online; its local draft remains editable.
+      }
+
+      scheduleCheck();
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState !== "visible") return;
+      if (retryTimer !== undefined) {
+        window.clearTimeout(retryTimer);
+        retryTimer = undefined;
+      }
+      void checkForRemoteNote();
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    scheduleCheck();
+    return () => {
+      active = false;
+      if (retryTimer !== undefined) window.clearTimeout(retryTimer);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [isHydrated, selected?.id, selected?.slug, selected?.version]);
+
   const persistNote = useCallback((note: Note, force = false) => {
     const task = saveQueueRef.current.then(async () => {
       const latestNote = notesRef.current.find((current) => current.slug === note.slug) ?? note;
