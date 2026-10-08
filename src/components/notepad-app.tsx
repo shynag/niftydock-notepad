@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { Editor } from "@tiptap/core";
+import { getMarkRange, type Editor } from "@tiptap/core";
 import {
   Bold,
   Check,
@@ -25,7 +25,6 @@ import { RichEditor } from "@/components/rich-editor";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-import { createClient } from "@/utils/supabase/client";
 
 type Note = { id: string; title: string; slug: string; content: string; updatedAt: number; version: number };
 type SaveState = "saved" | "saving" | "error";
@@ -149,21 +148,64 @@ export function NotepadApp({ initialSlug }: { initialSlug?: string }) {
   const [hydratedRoute, setHydratedRoute] = useState<string | null>(null);
   const isHydrated = hydratedRoute === routeKey;
   const [saveState, setSaveState] = useState<SaveState>("saved");
-  const [conflictError, setConflictError] = useState<string | null>(null);
-  const [realtimeState, setRealtimeState] = useState<"connecting" | "connected" | "offline">("connecting");
+  const [realtimeState, setRealtimeState] = useState<"connecting" | "connected" | "offline" | "saving" | "error">("connecting");
   const [copied, setCopied] = useState(false);
   const [copyFailed, setCopyFailed] = useState(false);
   const [characterCount, setCharacterCount] = useState(0);
   const [sourceMode, setSourceMode] = useState(false);
   const [editor, setEditor] = useState<Editor | null>(null);
   const [linkEditorOpen, setLinkEditorOpen] = useState(false);
+  const [linkIsEditing, setLinkIsEditing] = useState(false);
+  const [linkText, setLinkText] = useState("");
   const [linkUrl, setLinkUrl] = useState("");
+  const linkRangeRef = useRef({ from: 0, to: 0 });
   const versionsRef = useRef<Record<string, number>>({});
-  const lastSavedRef = useRef<Record<string, string>>({});
-  const pendingSavesRef = useRef<Record<string, boolean>>({});
+  const lastSavedTitleRef = useRef<Record<string, string>>({});
+  const collaborationFlushRef = useRef<() => Promise<void>>(async () => undefined);
+  const collaborationFlushReadyRef = useRef(false);
   const notesRef = useRef<Note[]>(notes);
   const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
   notesRef.current = notes;
+
+  const updateCollaborationStatus = useCallback((status: "connecting" | "connected" | "offline" | "saving" | "error") => {
+    setRealtimeState(status);
+  }, []);
+  const handleRemoteNoteUpdate = useCallback(async (slug: string, incomingVersion: number) => {
+    if (incomingVersion <= (versionsRef.current[slug] ?? 0)) return;
+    try {
+      const response = await fetch(`/api/notes/${encodeURIComponent(slug)}`, { cache: "no-store" });
+      if (!response.ok) return;
+      const result = await response.json();
+      const remoteNote = fromApiNote(result.note as ApiNote);
+      versionsRef.current[remoteNote.slug] = remoteNote.version;
+      setNotes((current) => current.map((item) => {
+        if (item.slug !== remoteNote.slug) return item;
+        const hasLocalTitleChange = lastSavedTitleRef.current[item.slug] !== item.title;
+        if (!hasLocalTitleChange) lastSavedTitleRef.current[item.slug] = remoteNote.title;
+        return {
+          ...item,
+          title: hasLocalTitleChange ? item.title : remoteNote.title,
+          version: remoteNote.version,
+          updatedAt: remoteNote.updatedAt,
+        };
+      }));
+    } catch {
+      // The document's Yjs updates are synchronized separately from note metadata.
+    }
+  }, []);
+  const registerCollaborationFlush = useCallback((flush: () => Promise<void>, ready: boolean) => {
+    collaborationFlushRef.current = flush;
+    collaborationFlushReadyRef.current = ready;
+  }, []);
+
+  const flushCollaboration = useCallback(async () => {
+    const deadline = Date.now() + 15000;
+    while (!collaborationFlushReadyRef.current && Date.now() < deadline) {
+      await new Promise((resolve) => window.setTimeout(resolve, 30));
+    }
+    if (!collaborationFlushReadyRef.current) throw new Error("Collaboration is not ready yet.");
+    await collaborationFlushRef.current();
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -239,15 +281,10 @@ export function NotepadApp({ initialSlug }: { initialSlug?: string }) {
       setSelectedId(loadedNote.id);
       if (loadedNote.version > 0) {
         versionsRef.current[loadedNote.slug] = loadedNote.version;
-        lastSavedRef.current[loadedNote.slug] = JSON.stringify([loadedNote.title, loadedNote.content]);
+        lastSavedTitleRef.current[loadedNote.slug] = loadedNote.title;
       } else {
         delete versionsRef.current[loadedNote.slug];
-        const fingerprint = JSON.stringify([loadedNote.title, loadedNote.content]);
-        if (loadedNote.title === "New note" && loadedNote.content === "") {
-          lastSavedRef.current[loadedNote.slug] = fingerprint;
-        } else {
-          delete lastSavedRef.current[loadedNote.slug];
-        }
+        lastSavedTitleRef.current[loadedNote.slug] = loadedNote.title;
       }
       setSaveState(loadError && loadedNote.version > 0 ? "error" : "saved");
       setRealtimeState("connecting");
@@ -293,51 +330,64 @@ export function NotepadApp({ initialSlug }: { initialSlug?: string }) {
   const persistNote = useCallback((note: Note, force = false) => {
     const task = saveQueueRef.current.then(async () => {
       const latestNote = notesRef.current.find((current) => current.slug === note.slug) ?? note;
-      const fingerprint = JSON.stringify([latestNote.title, latestNote.content]);
-      const version = versionsRef.current[latestNote.slug] ?? latestNote.version;
-      if (version > 0 && lastSavedRef.current[latestNote.slug] === fingerprint) return;
-      if (version === 0 && !force && lastSavedRef.current[latestNote.slug] === fingerprint) return;
+      let version = versionsRef.current[latestNote.slug] ?? latestNote.version;
+      const keepLocalTitle = lastSavedTitleRef.current[latestNote.slug] !== latestNote.title;
+      if (version === 0 && !force && latestNote.title === "New note" && !latestNote.content.trim()) return;
+      if (version > 0 && lastSavedTitleRef.current[latestNote.slug] === latestNote.title) return;
 
       setSaveState("saving");
-      pendingSavesRef.current[latestNote.slug] = true;
       try {
-        const response = version > 0
-          ? await fetch(`/api/notes/${encodeURIComponent(latestNote.slug)}`, {
-              method: "PATCH",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ title: latestNote.title, content: latestNote.content, version }),
-            })
-          : await fetch("/api/notes", {
+        let response = version === 0
+          ? await fetch("/api/notes", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ slug: latestNote.slug, title: latestNote.title, content: latestNote.content }),
+              body: JSON.stringify({ slug: latestNote.slug, title: latestNote.title, content: "" }),
+            })
+          : await fetch(`/api/notes/${encodeURIComponent(latestNote.slug)}`, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ title: latestNote.title, version }),
             });
 
-        if (response.status === 409) {
-          setConflictError("This note changed on another device. Reload to see the latest version.");
-          setSaveState("error");
-          return;
+        if (response.status === 409 && version === 0) {
+          const existingResponse = await fetch(`/api/notes/${encodeURIComponent(latestNote.slug)}`, { cache: "no-store" });
+          if (!existingResponse.ok) throw new Error("Could not recover the saved note after a version conflict.");
+          response = existingResponse;
+        }
+
+        if (response.status === 409 && version > 0) {
+          const latestResponse = await fetch(`/api/notes/${encodeURIComponent(latestNote.slug)}`, { cache: "no-store" });
+          if (!latestResponse.ok) throw new Error("Could not refresh the note title.");
+          const latestResult = await latestResponse.json();
+          const remoteNote = fromApiNote(latestResult.note as ApiNote);
+          version = remoteNote.version;
+          versionsRef.current[latestNote.slug] = version;
+          if (remoteNote.title === latestNote.title) response = latestResponse;
+          else {
+            response = await fetch(`/api/notes/${encodeURIComponent(latestNote.slug)}`, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ title: latestNote.title, version }),
+            });
+          }
         }
 
         if (!response.ok) throw new Error("Could not save the note.");
         const result = await response.json();
         const savedNote = fromApiNote(result.note as ApiNote);
         versionsRef.current[savedNote.slug] = savedNote.version;
-        lastSavedRef.current[savedNote.slug] = JSON.stringify([savedNote.title, savedNote.content]);
+        lastSavedTitleRef.current[savedNote.slug] = savedNote.title;
         setNotes((current) => current.map((currentNote) => currentNote.slug === savedNote.slug
-          ? { ...currentNote, id: savedNote.id, version: savedNote.version, updatedAt: savedNote.updatedAt }
+          ? { ...currentNote, title: version === 0 && !keepLocalTitle ? savedNote.title : currentNote.title, id: savedNote.id, version: savedNote.version, updatedAt: savedNote.updatedAt }
           : currentNote));
         setSelectedId((currentSelectedId) => {
-          const currentSelected = notesRef.current.find((n) => n.id === currentSelectedId);
-          if (currentSelected?.slug === savedNote.slug) {
-            return savedNote.id;
-          }
-          return currentSelectedId;
+          const currentSelected = notesRef.current.find((currentNote) => currentNote.id === currentSelectedId);
+          return currentSelected?.slug === savedNote.slug ? savedNote.id : currentSelectedId;
         });
         setSaveState("saved");
-        setConflictError(null);
-      } finally {
-        delete pendingSavesRef.current[latestNote.slug];
+      } catch (error) {
+        setSaveState("error");
+        throw error;
       }
     });
     saveQueueRef.current = task.catch(() => undefined);
@@ -346,8 +396,8 @@ export function NotepadApp({ initialSlug }: { initialSlug?: string }) {
 
   useEffect(() => {
     if (!isHydrated || !selected) return;
-    const fingerprint = JSON.stringify([selected.title, selectedContent]);
-    if (lastSavedRef.current[selected.slug] === fingerprint) return;
+    if (selected.version > 0 && lastSavedTitleRef.current[selected.slug] === selected.title) return;
+    if (selected.version === 0 && selected.title === "New note" && !selectedContent.trim()) return;
 
     const timeout = window.setTimeout(() => {
       void persistNote(selected).catch(() => setSaveState("error"));
@@ -356,82 +406,17 @@ export function NotepadApp({ initialSlug }: { initialSlug?: string }) {
     return () => window.clearTimeout(timeout);
   }, [isHydrated, persistNote, selected, selectedContent]);
 
-  const isSaved = (selected?.version ?? 0) > 0;
-  useEffect(() => {
-    if (!isHydrated || !selected?.slug || !isSaved) {
-      setRealtimeState("offline");
-      return;
-    }
-
-    let active = true;
-    let supabase: ReturnType<typeof createClient>;
-    try {
-      supabase = createClient();
-    } catch {
-      setRealtimeState("offline");
-      return;
-    }
-
-    const channel = supabase
-      .channel(`note:${selected.slug}`, { config: { private: true } })
-      .on("broadcast", { event: "note_updated" }, async ({ payload }) => {
-        if (!active) return;
-        const incomingVersion = Number(payload?.version);
-        if (!Number.isFinite(incomingVersion)) return;
-        if (pendingSavesRef.current[selected.slug]) return;
-        const current = notesRef.current.find((note) => note.slug === selected.slug);
-        if (!current) return;
-        if (incomingVersion <= (versionsRef.current[selected.slug] ?? current.version)) return;
-
-        const currentFingerprint = JSON.stringify([current.title, current.content]);
-        if (lastSavedRef.current[selected.slug] !== currentFingerprint) {
-          setSaveState("error");
-          return;
-        }
-
-        try {
-          const response = await fetch(`/api/notes/${encodeURIComponent(selected.slug)}`, { cache: "no-store" });
-          if (!response.ok) return;
-          const result = await response.json();
-          const remoteNote = fromApiNote(result.note as ApiNote);
-          if (!active) return;
-          const latest = notesRef.current.find((note) => note.slug === selected.slug);
-          if (!latest || JSON.stringify([latest.title, latest.content]) !== currentFingerprint) {
-            setSaveState("error");
-            return;
-          }
-
-          versionsRef.current[remoteNote.slug] = remoteNote.version;
-          lastSavedRef.current[remoteNote.slug] = JSON.stringify([remoteNote.title, remoteNote.content]);
-          setNotes((currentNotes) => currentNotes.map((note) => note.slug === remoteNote.slug
-            ? { ...note, title: remoteNote.title, content: remoteNote.content, updatedAt: remoteNote.updatedAt, version: remoteNote.version }
-            : note));
-          setSaveState("saved");
-        } catch {
-          // A later Realtime event or a reload will fetch the latest saved note.
-        }
-      })
-      .subscribe((status) => {
-        if (!active) return;
-        if (status === "SUBSCRIBED") setRealtimeState("connected");
-        else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
-          setRealtimeState("offline");
-        }
-      });
-
-    return () => {
-      active = false;
-      setRealtimeState("offline");
-      void supabase.removeChannel(channel);
-    };
-  }, [isHydrated, selected?.slug, isSaved]);
-
   const updateContent = useCallback((markdown: unknown) => {
     const content = typeof markdown === "string" ? markdown : "";
     const updatedAt = Date.now();
     setNotes((current) => {
       return current.map((note) => (note.id === selectedId || (selected?.slug && note.slug === selected.slug)) ? { ...note, content, updatedAt } : note);
     });
+  }, [selectedId, selected?.slug]);
+
+  const updateTitle = useCallback((title: string) => {
+    const updatedAt = Date.now();
+    setNotes((current) => current.map((note) => (note.id === selectedId || (selected?.slug && note.slug === selected.slug)) ? { ...note, title, updatedAt } : note));
   }, [selectedId, selected?.slug]);
 
   const applyMarkdown = (operation: "h1" | "h2" | "bold" | "italic" | "bullet" | "ordered" | "checklist" | "quote" | "code" | "table") => {
@@ -453,30 +438,44 @@ export function NotepadApp({ initialSlug }: { initialSlug?: string }) {
     }
   };
 
+  const openLinkEditor = () => {
+    if (!editor) return;
+
+    const { from, to, empty, $from } = editor.state.selection;
+    const activeLinkRange = empty ? getMarkRange($from, editor.schema.marks.link) : undefined;
+    const range = activeLinkRange ?? { from, to };
+    const existingLink = Boolean(activeLinkRange || editor.isActive("link"));
+    const existingText = editor.state.doc.textBetween(range.from, range.to, " ");
+
+    linkRangeRef.current = range;
+    setLinkIsEditing(existingLink);
+    setLinkText(existingText);
+    setLinkUrl(existingLink ? String(editor.getAttributes("link").href ?? "") : "");
+    setLinkEditorOpen(true);
+  };
+
+  const closeLinkEditor = () => {
+    setLinkEditorOpen(false);
+  };
+
   const applyLink = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!editor || !linkUrl.trim()) return;
+    if (!editor || !linkText.trim() || !linkUrl.trim()) return;
     const destination = /^(https?:|mailto:|tel:)/i.test(linkUrl.trim()) ? linkUrl.trim() : `https://${linkUrl.trim()}`;
-    const { empty } = editor.state.selection;
-    if (empty) {
-      editor.chain().focus().insertContent({
-        type: "text",
-        text: "link text",
-        marks: [{ type: "link", attrs: { href: destination } }],
-      }).run();
-    } else {
-      editor.chain().focus().setLink({ href: destination }).run();
-    }
+    editor.chain().focus().insertContentAt(linkRangeRef.current, {
+      type: "text",
+      text: linkText.trim(),
+      marks: [{ type: "link", attrs: { href: destination } }],
+    }).run();
+    setLinkText("");
     setLinkUrl("");
     setLinkEditorOpen(false);
   };
 
   const createNote = () => {
     if (selected) {
-      const currentFingerprint = JSON.stringify([selected.title, selectedContent]);
-      if (lastSavedRef.current[selected.slug] !== currentFingerprint) {
-        void persistNote(selected, selected.version === 0);
-      }
+      void persistNote(selected, true);
+      void flushCollaboration().catch(() => setSaveState("error"));
     }
 
     const now = Date.now();
@@ -489,9 +488,8 @@ export function NotepadApp({ initialSlug }: { initialSlug?: string }) {
       updatedAt: now,
       version: 0,
     };
-    lastSavedRef.current[slug] = JSON.stringify([note.title, note.content]);
+    lastSavedTitleRef.current[slug] = note.title;
     setSaveState("saved");
-    setConflictError(null);
     setNotes((current) => [note, ...current]);
     setSelectedId(note.id);
     window.history.pushState(null, "", `/${encodeURIComponent(note.slug)}`);
@@ -500,6 +498,7 @@ export function NotepadApp({ initialSlug }: { initialSlug?: string }) {
   const copyLink = async () => {
     try {
       await persistNote(selected, selected.version === 0);
+      await flushCollaboration();
     } catch {
       setSaveState("error");
       return;
@@ -529,7 +528,7 @@ export function NotepadApp({ initialSlug }: { initialSlug?: string }) {
       title={label}
       aria-label={label}
       aria-pressed={active}
-      disabled={disabled || !isHydrated || sourceMode}
+      disabled={disabled || !isHydrated || sourceMode || !editor?.isEditable}
       onMouseDown={(event) => event.preventDefault()}
       onClick={() => {
         onClick();
@@ -571,13 +570,7 @@ export function NotepadApp({ initialSlug }: { initialSlug?: string }) {
             <div className="toolbar-group">
               <ToolbarButton label="Bold" onClick={() => applyMarkdown("bold")} active={!!editor?.isActive("bold")}><Bold size={15} /></ToolbarButton>
               <ToolbarButton label="Italic" onClick={() => applyMarkdown("italic")} active={!!editor?.isActive("italic")}><Italic size={15} /></ToolbarButton>
-              <div className="link-toolbar-group">
-                <ToolbarButton label="Link" onClick={() => setLinkEditorOpen((open) => !open)} active={linkEditorOpen || !!editor?.isActive("link")}><Link2 size={15} /></ToolbarButton>
-                {linkEditorOpen && <form className="link-popover" onSubmit={applyLink}>
-                  <Input autoFocus aria-label="Link URL" placeholder="https://example.com" value={linkUrl} onChange={(event) => setLinkUrl(event.target.value)} className="link-url-input" />
-                  <Button type="submit" size="sm" className="link-apply-button">Apply</Button>
-                </form>}
-              </div>
+              <ToolbarButton label={editor?.isActive("link") ? "Edit link" : "Add link"} onClick={openLinkEditor} active={linkEditorOpen || !!editor?.isActive("link")}><Link2 size={15} /></ToolbarButton>
             </div>
             <span className="toolbar-separator" />
             <div className="toolbar-group toolbar-group-last">
@@ -593,7 +586,7 @@ export function NotepadApp({ initialSlug }: { initialSlug?: string }) {
                 title={sourceMode ? "Switch to visual editor" : "Switch to Markdown source"}
                 aria-label={sourceMode ? "Switch to visual editor" : "Switch to Markdown source"}
                 aria-pressed={sourceMode}
-                disabled={!isHydrated}
+                disabled={!isHydrated || !editor?.isEditable}
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={toggleSourceMode}
                 className={cn("toolbar-button", "source-mode-toggle", sourceMode && "toolbar-button-active")}
@@ -608,18 +601,26 @@ export function NotepadApp({ initialSlug }: { initialSlug?: string }) {
               aria-label="Note title"
               className="document-title"
               value={selected.title}
-              onChange={(event) => {
-                const title = event.target.value;
-                const updatedAt = Date.now();
-                setNotes((current) => {
-                  return current.map((note) => (note.id === selectedId || (selected?.slug && note.slug === selected.slug)) ? { ...note, title, updatedAt } : note);
-                });
-              }}
+              onChange={(event) => updateTitle(event.target.value)}
               placeholder="Untitled note"
             />
             <div className="document-meta">{isHydrated ? `Last edited ${formatDate(selected.updatedAt).toLowerCase()}` : "Last edited"}</div>
             <div className="rich-editor">
-              <RichEditor key={selected.slug || selected.id} value={selectedContent} sourceMode={sourceMode} onChange={updateContent} onPlainTextChange={(text) => setCharacterCount(Array.from(text).length)} onEditorReady={setEditor} />
+              <RichEditor
+                key={selected.slug || selected.id}
+                slug={selected.slug}
+                persisted={selected.version > 0}
+                value={selectedContent}
+                sourceMode={sourceMode}
+                title={selected.title}
+                onChange={updateContent}
+                onTitleChange={updateTitle}
+                onNoteUpdated={handleRemoteNoteUpdate}
+                onPlainTextChange={(text) => setCharacterCount(Array.from(text).length)}
+                onEditorReady={setEditor}
+                onCollaborationStatusChange={updateCollaborationStatus}
+                onFlushReady={registerCollaborationFlush}
+              />
             </div>
           </article>
           <div className="page-bottom-spacer" />
@@ -628,33 +629,57 @@ export function NotepadApp({ initialSlug }: { initialSlug?: string }) {
         <div className="statusbar" role="status" aria-label="Note status">
           <div className="status-left">
             <span>
-              <span className={cn("status-purple-dot", (saveState === "error" || conflictError) && "bg-destructive")} />
+              <span className={cn("status-purple-dot", (saveState === "error" || realtimeState === "error") && "bg-destructive")} />
               {!isHydrated
                 ? "Loading note..."
-                : saveState === "saving"
+                : saveState === "saving" || realtimeState === "saving"
                 ? "Saving"
-                : saveState === "error"
-                ? conflictError || "Save failed"
-                : selected.version > 0
+                : saveState === "error" || realtimeState === "error"
+                ? "Saved locally · retrying sync"
+                : selected.version > 0 && (realtimeState === "connected" || realtimeState === "offline")
                 ? "Saved to Supabase"
                 : "Saved on this device"}
             </span>
-            {conflictError && (
-              <button
-                type="button"
-                className="ml-2 underline text-xs text-[#cebaff] hover:text-white"
-                onClick={() => window.location.reload()}
-              >
-                Reload
-              </button>
-            )}
           </div>
           <div className="status-right">
             <span>{isHydrated ? `${characterCount} characters` : "— characters"}</span>
             <span className="status-divider" />
-            <span>{selected.version === 0 ? "Live after first save" : realtimeState === "connected" ? "Live active" : realtimeState === "connecting" ? "Connecting..." : "Live disconnected"}</span>
+            <span>{selected.version === 0 ? "Live after first save" : realtimeState === "connected" ? "Live active" : realtimeState === "connecting" ? "Connecting..." : realtimeState === "saving" ? "Saving..." : "Live disconnected"}</span>
           </div>
         </div>
+
+        {linkEditorOpen && (
+          <div
+            className="link-dialog-overlay"
+            onMouseDown={(event) => {
+              if (event.target === event.currentTarget) closeLinkEditor();
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") closeLinkEditor();
+            }}
+          >
+            <section className="link-dialog" role="dialog" aria-modal="true" aria-labelledby="link-dialog-title">
+              <div className="link-dialog-heading">
+                <h2 id="link-dialog-title">{linkIsEditing ? "Edit link" : "Add link"}</h2>
+                <p>Choose the text people will see and where it should open.</p>
+              </div>
+              <form className="link-dialog-form" onSubmit={applyLink}>
+                <label className="link-dialog-field">
+                  <span className="link-dialog-label">Display text</span>
+                  <Input autoFocus aria-label="Display text" placeholder="Link text" value={linkText} onChange={(event) => setLinkText(event.target.value)} />
+                </label>
+                <label className="link-dialog-field">
+                  <span className="link-dialog-label">URL</span>
+                  <Input aria-label="Link URL" type="text" inputMode="url" placeholder="https://example.com" value={linkUrl} onChange={(event) => setLinkUrl(event.target.value)} />
+                </label>
+                <div className="link-dialog-actions">
+                  <Button type="button" variant="ghost" onClick={closeLinkEditor}>Cancel</Button>
+                  <Button type="submit" disabled={!linkText.trim() || !linkUrl.trim()}>Apply link</Button>
+                </div>
+              </form>
+            </section>
+          </div>
+        )}
       </section>
     </main>
   );

@@ -19,7 +19,9 @@ Anyone with a note URL can read and edit that note. NiftyDock Notepad currently 
 - React 19 and TypeScript
 - Tailwind CSS with shadcn-style UI components
 - Tiptap for rich text and Markdown editing
-- Supabase Postgres for note storage and Supabase Realtime for change notifications
+- Yjs for merging simultaneous edits without overwriting a whole note
+- Supabase Postgres for notes and durable collaboration updates, Supabase Realtime Broadcast for live sync
+- IndexedDB for local recovery when a device is offline
 
 ## Requirements
 
@@ -40,7 +42,7 @@ Anyone with a note URL can read and edit that note. NiftyDock Notepad currently 
    cp .env.example .env.local
    ```
 
-3. In your Supabase project, open **SQL Editor** and run the files in `supabase/migrations` in timestamp order. These migrations create the notes table, configure Realtime broadcasts, and remove the password-related schema from an earlier version.
+3. In your Supabase project, open **SQL Editor** and run the files in `supabase/migrations` in timestamp order. The migrations add Yjs collaboration storage, Realtime edit broadcasts, and temporary cursor presence for open devices.
 
 4. In Supabase project settings, copy the project URL, publishable key, and secret key into `.env.local`:
 
@@ -73,10 +75,10 @@ Anyone with a note URL can read and edit that note. NiftyDock Notepad currently 
 
 - Opening `/` creates a local draft and redirects to its random slug URL, such as `/9yj63z`. Empty drafts are kept in browser storage and do not create database rows.
 - Opening a slug URL loads a saved note from the server. If the slug has no saved note, it opens as a local draft.
-- The first title or content edit saves the note to Supabase; later edits save automatically through the app's API routes.
+- The first title or content edit creates the note in Supabase. Later content edits are saved as Yjs updates, merged across devices, and periodically compacted into a snapshot.
 - Sharing an unsaved draft saves it first, then copies its URL.
-- The server uses the Supabase secret key to access Postgres. The browser uses the publishable key to subscribe to Realtime updates.
-- Realtime broadcasts contain note metadata, not note contents. The receiving device fetches the latest note from the API.
+- The server uses the Supabase secret key to access Postgres. The browser uses the publishable key to broadcast and receive Yjs updates; if Realtime disconnects, open editors poll for updates until it reconnects.
+- Draft Yjs updates are also stored in IndexedDB. When a device reconnects, it uploads edits that are missing from Supabase and merges the server state into its local document.
 
 ## Project structure
 

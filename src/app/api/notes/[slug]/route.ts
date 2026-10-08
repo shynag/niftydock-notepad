@@ -54,11 +54,11 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
   const title = values.title;
   const content = values.content;
   const expectedVersion = values.version;
-  if (typeof title !== "string" || typeof content !== "string") {
-    return jsonError("Title and note content must be strings.", 400);
+  if (typeof title !== "string" || (content !== undefined && typeof content !== "string")) {
+    return jsonError("Title must be a string and content, when provided, must be a string.", 400);
   }
   if (title.length > 200) return jsonError("Title must be 200 characters or fewer.", 400);
-  if (Buffer.byteLength(content, "utf8") > MAX_CONTENT_BYTES) {
+  if (typeof content === "string" && Buffer.byteLength(content, "utf8") > MAX_CONTENT_BYTES) {
     return jsonError("Note content must be 1 MB or smaller.", 413);
   }
   if (!Number.isInteger(expectedVersion) || Number(expectedVersion) < 1) {
@@ -66,9 +66,11 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
   }
 
   const supabase = createServiceClient();
+  const updateValues: { title: string; content?: string } = { title };
+  if (typeof content === "string") updateValues.content = content;
   const { data, error } = await supabase
     .from("notes")
-    .update({ title, content })
+    .update(updateValues)
     .eq("slug", slug)
     .eq("version", expectedVersion)
     .select(NOTE_FIELDS)
