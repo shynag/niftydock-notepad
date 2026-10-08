@@ -588,7 +588,7 @@ export function RichEditor({ slug, persisted, value, sourceMode, title, onChange
 
   return (
     <>
-      <div className="collaboration-editor-shell" aria-busy={persisted && !collaborationReady}>
+      <div className={sourceMode ? "collaboration-editor-shell source-mode-hidden" : "collaboration-editor-shell"} aria-busy={persisted && !collaborationReady}>
         <EditorContent editor={editor} className={cnEditorContentClass(sourceMode)} />
         {persisted && !collaborationReady && <div className="collaboration-editor-loading" role="status">Syncing shared note…</div>}
       </div>

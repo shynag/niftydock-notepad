@@ -112,6 +112,7 @@ button { cursor: pointer; }
 .rich-editor:focus-within { border-color: #37333f; background: #19181f; }
 .markdown-editor-content { min-height: 500px; }
 .markdown-editor-content.source-mode-hidden { display: none; }
+.collaboration-editor-shell.source-mode-hidden { display: none; }
 .markdown-editor-content .tiptap { min-height: 500px; outline: none; }
 .markdown-source-editor { display: block; width: 100%; min-height: 500px; padding: 0; resize: none; border: 0; outline: none; color: #c5c0ca; background: transparent; caret-color: #b59af5; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 14px; line-height: 1.8; white-space: pre-wrap; overflow-wrap: anywhere; }
 .markdown-source-editor::placeholder { color: #696371; }
