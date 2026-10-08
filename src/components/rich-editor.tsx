@@ -61,12 +61,14 @@ export function RichEditor({ slug, persisted, value, sourceMode, title, onChange
   statusChangeRef.current = onCollaborationStatusChange;
   const flushHandlerRef = useRef<() => Promise<void>>(async () => undefined);
   const initialValueRef = useRef(value);
+  const titleSyncPendingRef = useRef(false);
 
   useEffect(() => {
     const metadata = ydoc.getMap("metadata");
     const updateTitleFromDocument = () => {
       const sharedTitle = metadata.get("title");
       if (typeof sharedTitle === "string" && sharedTitle !== titleRef.current) {
+        if (titleSyncPendingRef.current) return;
         onTitleChangeRef.current(sharedTitle);
       }
     };
@@ -78,7 +80,19 @@ export function RichEditor({ slug, persisted, value, sourceMode, title, onChange
   useEffect(() => {
     if (!persisted || !collaborationReady) return;
     const metadata = ydoc.getMap("metadata");
-    if (metadata.get("title") !== title) metadata.set("title", title);
+    if (metadata.get("title") === title) {
+      titleSyncPendingRef.current = false;
+      return;
+    }
+
+    // Share a complete title after typing pauses so remote map updates cannot
+    // race individual keystrokes and repeatedly replace the controlled input.
+    titleSyncPendingRef.current = true;
+    const timeout = window.setTimeout(() => {
+      metadata.set("title", title);
+      titleSyncPendingRef.current = false;
+    }, 600);
+    return () => window.clearTimeout(timeout);
   }, [collaborationReady, persisted, title, ydoc]);
 
   const updateTableControlsPosition = useCallback((currentEditor: Editor | null) => {
