@@ -150,6 +150,7 @@ export function NotepadApp({ initialSlug }: { initialSlug?: string }) {
   const isHydrated = hydratedRoute === routeKey;
   const [saveState, setSaveState] = useState<SaveState>("saved");
   const [realtimeState, setRealtimeState] = useState<"connecting" | "connected" | "offline" | "saving" | "error">("connecting");
+  const [showSaveSpinner, setShowSaveSpinner] = useState(false);
   const [copied, setCopied] = useState(false);
   const [copyFailed, setCopyFailed] = useState(false);
   const [characterCount, setCharacterCount] = useState(0);
@@ -171,6 +172,17 @@ export function NotepadApp({ initialSlug }: { initialSlug?: string }) {
   const updateCollaborationStatus = useCallback((status: "connecting" | "connected" | "offline" | "saving" | "error") => {
     setRealtimeState(status);
   }, []);
+
+  useEffect(() => {
+    const isSaving = saveState === "saving" || realtimeState === "saving";
+    if (!isSaving) {
+      setShowSaveSpinner(false);
+      return;
+    }
+
+    const timeout = window.setTimeout(() => setShowSaveSpinner(true), 500);
+    return () => window.clearTimeout(timeout);
+  }, [realtimeState, saveState]);
   const handleRemoteNoteUpdate = useCallback(async (slug: string, incomingVersion: number) => {
     if (incomingVersion <= (versionsRef.current[slug] ?? 0)) return;
     try {
@@ -231,6 +243,21 @@ export function NotepadApp({ initialSlug }: { initialSlug?: string }) {
 
       const requestedSlug = initialSlug ? normalizeNoteSlug(initialSlug) : "";
       const cachedNote = requestedSlug ? stored.find((note) => note.slug === requestedSlug) : undefined;
+      if (cachedNote) {
+        setNotes((current) => [cachedNote, ...current.filter((note) => note.slug !== cachedNote.slug)]);
+        setSelectedId(cachedNote.id);
+        if (cachedNote.version > 0) {
+          versionsRef.current[cachedNote.slug] = cachedNote.version;
+          lastSavedTitleRef.current[cachedNote.slug] = cachedNote.title;
+        } else {
+          delete versionsRef.current[cachedNote.slug];
+          lastSavedTitleRef.current[cachedNote.slug] = cachedNote.title;
+        }
+        setSaveState("saved");
+        setRealtimeState("connecting");
+        setHydratedRoute(routeKey);
+      }
+
       let loadedNote: Note | null = null;
       let loadError = false;
 
@@ -266,30 +293,45 @@ export function NotepadApp({ initialSlug }: { initialSlug?: string }) {
         }
       } catch {
         loadError = true;
-        loadedNote = {
+        loadedNote = cachedNote ?? {
           id: `offline-${Date.now()}`,
-          title: cachedNote?.title ?? "New note",
+          title: "New note",
           slug: requestedSlug || createRandomSlug(stored.map((note) => note.slug)),
-          content: cachedNote?.content ?? "",
+          content: "",
           updatedAt: Date.now(),
           version: 0,
         };
       }
 
       if (!active || !loadedNote) return;
-      const nextNotes = [loadedNote, ...stored.filter((note) => note.slug !== loadedNote?.slug)];
-      setNotes(nextNotes);
-      setSelectedId(loadedNote.id);
-      if (loadedNote.version > 0) {
-        versionsRef.current[loadedNote.slug] = loadedNote.version;
-        lastSavedTitleRef.current[loadedNote.slug] = loadedNote.title;
+      const currentCachedNote = cachedNote
+        ? notesRef.current.find((note) => note.slug === cachedNote.slug)
+        : undefined;
+      const hasLocalEditsSinceCache = Boolean(
+        cachedNote &&
+        currentCachedNote &&
+        (currentCachedNote.title !== cachedNote.title || currentCachedNote.content !== cachedNote.content),
+      );
+      const resolvedNote = hasLocalEditsSinceCache && currentCachedNote
+        ? {
+            ...loadedNote,
+            title: currentCachedNote.title,
+            content: currentCachedNote.content,
+            updatedAt: currentCachedNote.updatedAt,
+          }
+        : loadedNote;
+      setNotes((current) => [resolvedNote, ...current.filter((note) => note.slug !== resolvedNote.slug)]);
+      setSelectedId(resolvedNote.id);
+      if (resolvedNote.version > 0) {
+        versionsRef.current[resolvedNote.slug] = resolvedNote.version;
+        lastSavedTitleRef.current[resolvedNote.slug] = loadedNote.title;
       } else {
-        delete versionsRef.current[loadedNote.slug];
-        lastSavedTitleRef.current[loadedNote.slug] = loadedNote.title;
+        delete versionsRef.current[resolvedNote.slug];
+        lastSavedTitleRef.current[resolvedNote.slug] = resolvedNote.title;
       }
-      setSaveState(loadError && loadedNote.version > 0 ? "error" : "saved");
+      setSaveState(loadError && resolvedNote.version > 0 ? "error" : "saved");
       setRealtimeState("connecting");
-      if (!requestedSlug) window.history.replaceState(null, "", `/${encodeURIComponent(loadedNote.slug)}`);
+      if (!requestedSlug) window.history.replaceState(null, "", `/${encodeURIComponent(resolvedNote.slug)}`);
       setHydratedRoute(routeKey);
     };
 
@@ -701,7 +743,7 @@ export function NotepadApp({ initialSlug }: { initialSlug?: string }) {
           <span className="status-character-count">{isHydrated ? `${characterCount} characters` : "— characters"}</span>
           <div className="status-indicators">
             <span className="status-icon">
-              {(!isHydrated || saveState === "saving" || realtimeState === "saving") && (
+              {showSaveSpinner && (
                 <LoaderCircle className="animate-spin" aria-label="Saving..." role="img" />
               )}
             </span>
