@@ -67,8 +67,8 @@ button { cursor: pointer; }
 .topbar-left, .topbar-right { display: flex; align-items: center; gap: 12px; }
 .topbar-brand { display: flex; align-items: center; gap: 12px; }
 .topbar-right { gap: 12px; }
-.topbar-right .new-note-button, .topbar-right .share-button { min-height: 36px; padding: 0 14px; border-radius: 8px; font-size: 13px; }
-.topbar-right .new-note-button svg, .topbar-right .share-button svg { width: 16px; height: 16px; }
+.topbar-right .new-note-button, .topbar-right .share-button, .topbar-right .search-note-button { min-height: 36px; padding: 0 14px; border-radius: 8px; font-size: 13px; }
+.topbar-right .new-note-button svg, .topbar-right .share-button svg, .topbar-right .search-note-button svg { width: 16px; height: 16px; }
 .share-button { order: 0; }
 .new-note-button { order: 1; }
 .save-indicator { display: flex; align-items: center; gap: 7px; color: #817b89; font-size: 11px; }
@@ -77,6 +77,7 @@ button { cursor: pointer; }
 @keyframes pulse { to { opacity: .35; } }
 .topbar-divider { width: 1px; height: 19px; background: #302d36; }
 .new-note-button { gap: 6px; }
+.search-note-button { gap: 6px; }
 .editor-toolbar-wrap { display: flex; min-height: 64px; align-items: center; justify-content: center; border-bottom: 1px solid #25222b; background: #151419; padding: 0 24px; }
 .editor-toolbar-wrap { scrollbar-color: #403e46 #151419; }
 .editor-toolbar-wrap::-webkit-scrollbar { height: 6px; }
@@ -202,9 +203,10 @@ button { cursor: pointer; }
   .app-main { width: 100%; }
   .topbar { height: 62px; flex-basis: 62px; padding: 0 16px; }
   .topbar-left, .topbar-right { gap: 5px; }
-  .topbar-right .new-note-button, .topbar-right .share-button { min-height: 36px; padding: 0 10px; font-size: 12px; }
+  .topbar-right .new-note-button, .topbar-right .share-button, .topbar-right .search-note-button { min-height: 36px; padding: 0 10px; font-size: 12px; }
   .share-button { height: 31px; padding: 0 9px; }
   .new-note-button { height: 31px; padding: 0 8px; }
+  .search-note-button { height: 31px; padding: 0 8px; }
   .save-indicator { font-size: 0; gap: 0; }
   .save-dot { width: 7px; height: 7px; }
   .topbar-divider { margin: 0 4px; }
@@ -239,7 +241,11 @@ button { cursor: pointer; }
 
 @media (max-width: 420px) {
   .document-title { font-size: 30px; }
+  .share-button span { display: none; }
   .new-note-button span { display: none; }
+  .search-note-button span { display: none; }
+  .topbar-right .share-button { width: 36px; min-width: 36px; padding: 0; justify-content: center; }
   .topbar-right .new-note-button { width: 36px; min-width: 36px; padding: 0; justify-content: center; }
+  .topbar-right .search-note-button { width: 36px; min-width: 36px; padding: 0; justify-content: center; }
   .table-edit-menu { width: min(190px, calc(100vw - 16px)); }
 }

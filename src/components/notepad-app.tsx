@@ -17,6 +17,7 @@ import {
   ListOrdered,
   Plus,
   Quote,
+  Search,
   Share2,
   Table2,
   Redo2,
@@ -181,6 +182,10 @@ export function NotepadApp({ initialSlug }: { initialSlug?: string }) {
   const [newNoteSlugEdited, setNewNoteSlugEdited] = useState(false);
   const [newNoteError, setNewNoteError] = useState("");
   const [isCreatingNote, setIsCreatingNote] = useState(false);
+  const [searchNoteDialogOpen, setSearchNoteDialogOpen] = useState(false);
+  const [searchNoteSlug, setSearchNoteSlug] = useState("");
+  const [searchNoteError, setSearchNoteError] = useState("");
+  const [isSearchingNote, setIsSearchingNote] = useState(false);
   const linkRangeRef = useRef({ from: 0, to: 0 });
   const versionsRef = useRef<Record<string, number>>({});
   const lastSavedTitleRef = useRef<Record<string, string>>({});
@@ -689,6 +694,44 @@ export function NotepadApp({ initialSlug }: { initialSlug?: string }) {
     }
   };
 
+  const searchNote = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const enteredSlug = searchNoteSlug.trim().replace(/^\/+|\/+$/g, "").toLowerCase();
+    const slug = normalizeNoteSlug(enteredSlug);
+    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug) || slug.length > 80) {
+      setSearchNoteError("Enter a valid note slug.");
+      return;
+    }
+
+    setIsSearchingNote(true);
+    setSearchNoteError("");
+    try {
+      const response = await fetch(`/api/notes/${encodeURIComponent(slug)}`, { cache: "no-store" });
+      if (response.status === 404) {
+        setSearchNoteError("No note found with that slug.");
+        return;
+      }
+      if (!response.ok) {
+        const result = await response.json().catch(() => null) as { error?: string } | null;
+        throw new Error(result?.error ?? "Could not search for the note.");
+      }
+
+      if (selected?.slug) {
+        await persistNote(selected, true);
+        if ((versionsRef.current[selected.slug] ?? selected.version) > 0) {
+          await flushCollaboration();
+        }
+      }
+
+      setSearchNoteDialogOpen(false);
+      window.location.assign(`/${encodeURIComponent(slug)}`);
+    } catch (error) {
+      setSearchNoteError(error instanceof Error ? error.message : "Could not search for the note.");
+    } finally {
+      setIsSearchingNote(false);
+    }
+  };
+
   const copyLink = async () => {
     try {
       await persistNote(selected, selected.version === 0);
@@ -744,6 +787,21 @@ export function NotepadApp({ initialSlug }: { initialSlug?: string }) {
             </div>
           </div>
           <div className="topbar-right">
+            <Button
+              variant="ghost"
+              size="default"
+              className="search-note-button"
+              aria-label="Search note by slug"
+              onClick={() => {
+                setSearchNoteSlug("");
+                setSearchNoteError("");
+                setSearchNoteDialogOpen(true);
+              }}
+              disabled={!isHydrated}
+            >
+              <Search size={17} />
+              <span>Search</span>
+            </Button>
             <Button variant="ghost" size="default" className="share-button" onClick={copyLink} disabled={!isHydrated}>{copied ? <Check size={17} /> : <Share2 size={17} />}<span>{copied ? "Copied" : copyFailed ? "Copy failed" : "Share"}</span></Button>
             <Button variant="subtle" size="default" className="new-note-button" onClick={openNewNoteDialog} disabled={!isHydrated}><Plus size={18} /><span>New note</span></Button>
           </div>
@@ -830,6 +888,49 @@ export function NotepadApp({ initialSlug }: { initialSlug?: string }) {
             </span>
           </div>
         </div>
+
+        {searchNoteDialogOpen && (
+          <div
+            className="link-dialog-overlay"
+            onMouseDown={(event) => {
+              if (!isSearchingNote && event.target === event.currentTarget) setSearchNoteDialogOpen(false);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Escape" && !isSearchingNote) setSearchNoteDialogOpen(false);
+            }}
+          >
+            <section className="link-dialog" role="dialog" aria-modal="true" aria-labelledby="search-note-dialog-title">
+              <div className="link-dialog-heading">
+                <h2 id="search-note-dialog-title">Find a note</h2>
+                <p>Enter the slug from the note URL.</p>
+              </div>
+              <form className="link-dialog-form" onSubmit={searchNote}>
+                <label className="link-dialog-field">
+                  <span className="link-dialog-label">Note slug</span>
+                  <Input
+                    autoFocus
+                    maxLength={80}
+                    pattern="[a-z0-9]+(-[a-z0-9]+)*"
+                    placeholder="project-ideas"
+                    value={searchNoteSlug}
+                    onChange={(event) => {
+                      setSearchNoteSlug(event.target.value.toLowerCase());
+                      setSearchNoteError("");
+                    }}
+                  />
+                </label>
+                {searchNoteError && <p className="new-note-error" role="alert">{searchNoteError}</p>}
+                <div className="link-dialog-actions">
+                  <Button type="button" variant="ghost" onClick={() => setSearchNoteDialogOpen(false)} disabled={isSearchingNote}>Cancel</Button>
+                  <Button type="submit" className="new-note-submit-button" disabled={isSearchingNote || !searchNoteSlug.trim()}>
+                    {isSearchingNote ? <LoaderCircle className="animate-spin" size={16} /> : <Search size={16} />}
+                    {isSearchingNote ? "Searching..." : "Search"}
+                  </Button>
+                </div>
+              </form>
+            </section>
+          </div>
+        )}
 
         {newNoteDialogOpen && (
           <div
