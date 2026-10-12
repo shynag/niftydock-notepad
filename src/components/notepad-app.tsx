@@ -113,6 +113,16 @@ function createRandomSlug(existingSlugs: Iterable<string>) {
   return slug;
 }
 
+function slugFromTitle(title: string) {
+  return title.normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80)
+    .replace(/-+$/g, "");
+}
+
 function LoadingSkeleton() {
   return (
     <div className="document-scroll" aria-label="Loading note content" aria-busy="true">
@@ -165,6 +175,12 @@ export function NotepadApp({ initialSlug }: { initialSlug?: string }) {
   const [linkIsEditing, setLinkIsEditing] = useState(false);
   const [linkText, setLinkText] = useState("");
   const [linkUrl, setLinkUrl] = useState("");
+  const [newNoteDialogOpen, setNewNoteDialogOpen] = useState(false);
+  const [newNoteTitle, setNewNoteTitle] = useState("");
+  const [newNoteSlug, setNewNoteSlug] = useState("");
+  const [newNoteSlugEdited, setNewNoteSlugEdited] = useState(false);
+  const [newNoteError, setNewNoteError] = useState("");
+  const [isCreatingNote, setIsCreatingNote] = useState(false);
   const linkRangeRef = useRef({ from: 0, to: 0 });
   const versionsRef = useRef<Record<string, number>>({});
   const lastSavedTitleRef = useRef<Record<string, string>>({});
@@ -606,27 +622,71 @@ export function NotepadApp({ initialSlug }: { initialSlug?: string }) {
     setLinkEditorOpen(false);
   };
 
-  const createNote = () => {
-    if (selected) {
-      void persistNote(selected, true);
-      void flushCollaboration().catch(() => setSaveState("error"));
+  const openNewNoteDialog = () => {
+    setNewNoteTitle("");
+    setNewNoteSlug("");
+    setNewNoteSlugEdited(false);
+    setNewNoteError("");
+    setNewNoteDialogOpen(true);
+  };
+
+  const createNote = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const title = newNoteTitle.trim();
+    const slug = newNoteSlug.trim().toLowerCase();
+    if (!title) {
+      setNewNoteError("Enter a note name.");
+      return;
+    }
+    if (title.length > 200) {
+      setNewNoteError("Note name must be 200 characters or fewer.");
+      return;
+    }
+    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug) || slug.length > 80) {
+      setNewNoteError("Use lowercase letters, numbers, and single hyphens for the slug.");
+      return;
+    }
+    if (notesRef.current.some((note) => note.slug === slug)) {
+      setNewNoteError("That slug is already used in this app.");
+      return;
     }
 
-    const now = Date.now();
-    const slug = createRandomSlug(notesRef.current.map((item) => item.slug));
-    const note: Note = {
-      id: `local-${now}-${slug}`,
-      title: "New note",
-      slug,
-      content: "",
-      updatedAt: now,
-      version: 0,
-    };
-    lastSavedTitleRef.current[slug] = note.title;
-    setSaveState("saved");
-    setNotes((current) => [note, ...current]);
-    setSelectedId(note.id);
-    window.history.pushState(null, "", `/${encodeURIComponent(note.slug)}`);
+    setIsCreatingNote(true);
+    setNewNoteError("");
+    try {
+      if (selected) {
+        await persistNote(selected, true);
+        if (selected.version > 0) await flushCollaboration();
+      }
+
+      const response = await fetch("/api/notes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ slug, title, content: "" }),
+      });
+      if (!response.ok) {
+        if (response.status === 409) {
+          setNewNoteError("That slug is already in use. Choose a different one.");
+          return;
+        }
+        const result = await response.json().catch(() => null) as { error?: string } | null;
+        throw new Error(result?.error ?? "Could not create the note.");
+      }
+
+      const result = await response.json() as { note: ApiNote };
+      const note = fromApiNote(result.note);
+      versionsRef.current[note.slug] = note.version;
+      lastSavedTitleRef.current[note.slug] = note.title;
+      setSaveState("saved");
+      setNotes((current) => [note, ...current.filter((item) => item.slug !== note.slug)]);
+      setSelectedId(note.id);
+      window.history.pushState(null, "", `/${encodeURIComponent(note.slug)}`);
+      setNewNoteDialogOpen(false);
+    } catch (error) {
+      setNewNoteError(error instanceof Error ? error.message : "Could not create the note.");
+    } finally {
+      setIsCreatingNote(false);
+    }
   };
 
   const copyLink = async () => {
@@ -685,7 +745,7 @@ export function NotepadApp({ initialSlug }: { initialSlug?: string }) {
           </div>
           <div className="topbar-right">
             <Button variant="ghost" size="default" className="share-button" onClick={copyLink} disabled={!isHydrated}>{copied ? <Check size={17} /> : <Share2 size={17} />}<span>{copied ? "Copied" : copyFailed ? "Copy failed" : "Share"}</span></Button>
-            <Button variant="subtle" size="default" className="new-note-button" onClick={createNote} disabled={!isHydrated}><Plus size={18} /><span>New note</span></Button>
+            <Button variant="subtle" size="default" className="new-note-button" onClick={openNewNoteDialog} disabled={!isHydrated}><Plus size={18} /><span>New note</span></Button>
           </div>
         </header>
 
@@ -770,6 +830,68 @@ export function NotepadApp({ initialSlug }: { initialSlug?: string }) {
             </span>
           </div>
         </div>
+
+        {newNoteDialogOpen && (
+          <div
+            className="link-dialog-overlay"
+            onMouseDown={(event) => {
+              if (!isCreatingNote && event.target === event.currentTarget) setNewNoteDialogOpen(false);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Escape" && !isCreatingNote) setNewNoteDialogOpen(false);
+            }}
+          >
+            <section className="link-dialog" role="dialog" aria-modal="true" aria-labelledby="new-note-dialog-title">
+              <div className="link-dialog-heading">
+                <h2 id="new-note-dialog-title">Create a note</h2>
+                <p>Choose a name and a URL slug for your note.</p>
+              </div>
+              <form className="link-dialog-form" onSubmit={createNote}>
+                <label className="link-dialog-field">
+                  <span className="link-dialog-label">Note name</span>
+                  <Input
+                    autoFocus
+                    maxLength={200}
+                    placeholder="e.g. Project ideas"
+                    value={newNoteTitle}
+                    onChange={(event) => {
+                      const title = event.target.value;
+                      setNewNoteTitle(title);
+                      if (!newNoteSlugEdited) setNewNoteSlug(slugFromTitle(title));
+                      setNewNoteError("");
+                    }}
+                  />
+                </label>
+                <label className="link-dialog-field">
+                  <span className="link-dialog-label">Slug</span>
+                  <Input
+                    maxLength={80}
+                    pattern="[a-z0-9]+(-[a-z0-9]+)*"
+                    placeholder="project-ideas"
+                    value={newNoteSlug}
+                    onChange={(event) => {
+                      setNewNoteSlugEdited(true);
+                      setNewNoteSlug(event.target.value.toLowerCase());
+                      setNewNoteError("");
+                    }}
+                  />
+                </label>
+                <p className="new-note-url-preview">
+                  https://niftydock-notepad.vercel.app/
+                  <strong>{newNoteSlug || "your-slug"}</strong>
+                </p>
+                {newNoteError && <p className="new-note-error" role="alert">{newNoteError}</p>}
+                <div className="link-dialog-actions">
+                  <Button type="button" variant="ghost" onClick={() => setNewNoteDialogOpen(false)} disabled={isCreatingNote}>Cancel</Button>
+                  <Button type="submit" className="new-note-submit-button" disabled={isCreatingNote || !newNoteTitle.trim() || !newNoteSlug.trim()}>
+                    {isCreatingNote ? <LoaderCircle className="animate-spin" size={16} /> : <Plus size={16} />}
+                    {isCreatingNote ? "Creating..." : "Create note"}
+                  </Button>
+                </div>
+              </form>
+            </section>
+          </div>
+        )}
 
         {linkEditorOpen && (
           <div

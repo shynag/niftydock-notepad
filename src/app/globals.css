@@ -174,6 +174,10 @@ button { cursor: pointer; }
 .link-dialog-field input { height: 42px; font-size: 14px; }
 .link-dialog-actions { display: flex; justify-content: flex-end; gap: 9px; margin-top: 5px; }
 .link-dialog-actions button { min-height: 38px; }
+.link-dialog-actions .new-note-submit-button { color: #000; }
+.new-note-url-preview { margin: -7px 0 0; overflow-wrap: anywhere; color: #8f8996; font-size: 12px; line-height: 1.5; }
+.new-note-url-preview strong { color: #c9c3d3; font-weight: 500; }
+.new-note-error { margin: -6px 0 0; color: #f0a7a7; font-size: 13px; line-height: 1.5; }
 .page-bottom-spacer { height: 70px; }
 .statusbar { position: relative; display: flex; min-height: 48px; flex: 0 0 48px; align-items: center; justify-content: space-between; padding: 0 26px; border-top: 1px solid #26232c; background: #151419; color: #918b99; font-size: 13px; }
 .status-character-count { color: #aaa4b0; }
