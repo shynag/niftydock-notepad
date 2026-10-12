@@ -7,7 +7,6 @@ import {
   Check,
   Code2,
   FileCode2,
-  HardDrive,
   Heading1,
   Heading2,
   Italic,
@@ -16,11 +15,9 @@ import {
   List,
   ListChecks,
   ListOrdered,
-  Monitor,
   Plus,
   Quote,
   Share2,
-  Server,
   Table2,
   Redo2,
   Undo2,
@@ -703,42 +700,11 @@ export function NotepadApp({ initialSlug }: { initialSlug?: string }) {
         <div className="statusbar" role="status" aria-label="Note status">
           <span className="status-character-count">{isHydrated ? `${characterCount} characters` : "— characters"}</span>
           <div className="status-indicators">
-            {(() => {
-              const isSaving = !isHydrated || saveState === "saving" || realtimeState === "saving";
-              const hasSyncError = saveState === "error" || realtimeState === "error";
-              const isSavedToSupabase = selected.version > 0 && (realtimeState === "connected" || realtimeState === "offline");
-              const saveLabel = isSaving
-                ? "Saving..."
-                : hasSyncError
-                ? "Saved locally · retrying sync"
-                : isSavedToSupabase
-                ? "Saved to Supabase"
-                : "Saved on this device";
-              const SaveIcon = isSaving ? LoaderCircle : hasSyncError || isSavedToSupabase ? Server : HardDrive;
-              const liveLabel = selected.version === 0
-                ? "Live after first save"
-                : realtimeState === "connected"
-                ? "Live active"
-                : realtimeState === "connecting"
-                ? "Connecting..."
-                : realtimeState === "saving"
-                ? "Saving live edits..."
-                : "Live disconnected";
-              return (
-                <>
-                  <span
-                    className="status-icon"
-                    title={liveLabel}
-                    aria-label={liveLabel}
-                  >
-                    <Monitor aria-hidden="true" />
-                  </span>
-                  <span className={cn("status-icon", hasSyncError && "status-icon-error")} title={saveLabel} aria-label={saveLabel}>
-                    <SaveIcon className={cn(isSaving && "animate-spin")} aria-hidden="true" />
-                  </span>
-                </>
-              );
-            })()}
+            <span className="status-icon">
+              {(!isHydrated || saveState === "saving" || realtimeState === "saving") && (
+                <LoaderCircle className="animate-spin" aria-label="Saving..." role="img" />
+              )}
+            </span>
           </div>
         </div>
 

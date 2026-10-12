@@ -27,7 +27,7 @@ type RichEditorProps = {
   onFlushReady: (flush: () => Promise<void>, ready: boolean) => void;
 };
 
-type TableControlsPosition = { top: number; left: number };
+type TableControlsPosition = { top: number; left: number; menuAbove: boolean };
 
 function createUpdateId() {
   const bytes = new Uint8Array(16);
@@ -46,6 +46,8 @@ export function RichEditor({ slug, persisted, value, sourceMode, title, onChange
   const [tableMenuOpen, setTableMenuOpen] = useState(false);
   const [collaborationReady, setCollaborationReady] = useState(false);
   const tableControlsRef = useRef<HTMLDivElement>(null);
+  const tableMenuOpenRef = useRef(tableMenuOpen);
+  tableMenuOpenRef.current = tableMenuOpen;
   const [ydoc] = useState(() => new Y.Doc());
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
@@ -97,34 +99,55 @@ export function RichEditor({ slug, persisted, value, sourceMode, title, onChange
 
   const updateTableControlsPosition = useCallback((currentEditor: Editor | null) => {
     if (!currentEditor?.isActive("table")) {
-      setTableControlsPosition(null);
+      if (!tableMenuOpenRef.current) setTableControlsPosition(null);
       return;
     }
 
     try {
-      const position = currentEditor.state.selection.from;
-      const selectedNode = currentEditor.view.domAtPos(position).node;
-      const selectedElement = selectedNode.nodeType === 1
-        ? selectedNode as Element
-        : selectedNode.parentElement;
-      const table = selectedElement?.closest("table");
+      const selectionNode = currentEditor.view.domAtPos(currentEditor.state.selection.from).node;
+      const selectionElement = selectionNode.nodeType === Node.ELEMENT_NODE
+        ? selectionNode as Element
+        : selectionNode.parentElement;
+      const row = selectionElement?.closest("th, td")?.closest("tr");
+      const table = row?.closest("table");
       const container = currentEditor.view.dom.closest(".rich-editor");
-      if (!table || !container) {
+      if (!row || !table || !container) {
         setTableControlsPosition(null);
         return;
       }
 
+      const rowRect = row.getBoundingClientRect();
       const tableRect = table.getBoundingClientRect();
       const containerRect = container.getBoundingClientRect();
-      const controlsSize = 34;
-      const newTop = Math.max(8, tableRect.top - containerRect.top - 17);
-      const newLeft = Math.max(8, Math.min(tableRect.right - containerRect.left - controlsSize, containerRect.width - controlsSize - 8));
+      const controlSize = 34;
+      const controlOffset = 12;
+      const visualViewport = window.visualViewport;
+      const viewportTop = visualViewport?.offsetTop ?? 0;
+      const viewportBottom = visualViewport
+        ? visualViewport.offsetTop + visualViewport.height
+        : window.innerHeight;
+      const rowTop = rowRect.top - containerRect.top + (rowRect.height - controlSize) / 2;
+      const maxTop = viewportBottom - containerRect.top - controlSize - 8;
+      const top = Math.max(8, Math.min(rowTop, maxTop));
+      const left = Math.max(8, Math.min(
+        tableRect.right - containerRect.left - controlSize + controlOffset,
+        containerRect.width - controlSize - 8,
+      ));
+      const triggerTop = containerRect.top + top;
+      const spaceAbove = Math.max(0, triggerTop - viewportTop - 8);
+      const spaceBelow = Math.max(0, viewportBottom - triggerTop - controlSize - 8);
+      const menuAbove = spaceAbove > spaceBelow;
 
-      setTableControlsPosition((prev) => {
-        if (prev && Math.abs(prev.top - newTop) < 1 && Math.abs(prev.left - newLeft) < 1) {
-          return prev;
+      setTableControlsPosition((previous) => {
+        if (
+          previous &&
+          Math.abs(previous.top - top) < 1 &&
+          Math.abs(previous.left - left) < 1 &&
+          previous.menuAbove === menuAbove
+        ) {
+          return previous;
         }
-        return { top: newTop, left: newLeft };
+        return { top, left, menuAbove };
       });
     } catch {
       setTableControlsPosition(null);
@@ -132,13 +155,57 @@ export function RichEditor({ slug, persisted, value, sourceMode, title, onChange
   }, []);
 
   useEffect(() => {
+    if (sourceMode) {
+      setTableMenuOpen(false);
+      tableMenuOpenRef.current = false;
+      setTableControlsPosition(null);
+    }
+  }, [sourceMode]);
+
+  useEffect(() => {
+    if (!tableMenuOpen) return;
+
+    const frame = window.requestAnimationFrame(() => {
+      const menu = tableControlsRef.current?.querySelector<HTMLElement>(".table-edit-menu");
+      const scrollContainer = tableControlsRef.current?.closest(".rich-editor")
+        ?.closest(".document-scroll");
+      if (!menu || !scrollContainer) return;
+
+      const menuRect = menu.getBoundingClientRect();
+      const viewport = window.visualViewport;
+      const viewportTop = viewport?.offsetTop ?? 0;
+      const viewportBottom = viewport
+        ? viewport.offsetTop + viewport.height
+        : window.innerHeight;
+      const margin = 8;
+      let scrollDelta = 0;
+
+      if (menuRect.top < viewportTop + margin) {
+        scrollDelta = menuRect.top - viewportTop - margin;
+      } else if (menuRect.bottom > viewportBottom - margin) {
+        scrollDelta = menuRect.bottom - viewportBottom + margin;
+      }
+
+      if (scrollDelta) scrollContainer.scrollBy({ top: scrollDelta, behavior: "smooth" });
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [tableMenuOpen]);
+
+  useEffect(() => {
     if (!tableMenuOpen) return;
 
     const closeOnOutsideClick = (event: PointerEvent) => {
-      if (!tableControlsRef.current?.contains(event.target as Node)) setTableMenuOpen(false);
+      if (!tableControlsRef.current?.contains(event.target as Node)) {
+        tableMenuOpenRef.current = false;
+        setTableMenuOpen(false);
+      }
     };
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setTableMenuOpen(false);
+      if (event.key === "Escape") {
+        tableMenuOpenRef.current = false;
+        setTableMenuOpen(false);
+      }
     };
     document.addEventListener("pointerdown", closeOnOutsideClick);
     document.addEventListener("keydown", closeOnEscape);
@@ -147,10 +214,6 @@ export function RichEditor({ slug, persisted, value, sourceMode, title, onChange
       document.removeEventListener("keydown", closeOnEscape);
     };
   }, [tableMenuOpen]);
-
-  useEffect(() => {
-    if (sourceMode) setTableMenuOpen(false);
-  }, [sourceMode]);
 
   const editor = useEditor({
     immediatelyRender: false,
@@ -172,7 +235,7 @@ export function RichEditor({ slug, persisted, value, sourceMode, title, onChange
     },
     onSelectionUpdate: ({ editor: currentEditor }) => {
       updateTableControlsPosition(currentEditor);
-      if (!currentEditor.isActive("table")) setTableMenuOpen(false);
+      if (!currentEditor.isActive("table") && !tableMenuOpenRef.current) setTableMenuOpen(false);
     },
   });
 
@@ -590,12 +653,16 @@ export function RichEditor({ slug, persisted, value, sourceMode, title, onChange
     const refresh = () => updateTableControlsPosition(editor);
     editor.on("transaction", refresh);
     window.addEventListener("resize", refresh);
+    window.visualViewport?.addEventListener("resize", refresh);
+    window.visualViewport?.addEventListener("scroll", refresh);
     const scrollContainer = editor.view.dom.closest(".document-scroll");
     scrollContainer?.addEventListener("scroll", refresh, { passive: true });
     refresh();
     return () => {
       editor.off("transaction", refresh);
       window.removeEventListener("resize", refresh);
+      window.visualViewport?.removeEventListener("resize", refresh);
+      window.visualViewport?.removeEventListener("scroll", refresh);
       scrollContainer?.removeEventListener("scroll", refresh);
     };
   }, [editor, updateTableControlsPosition]);
@@ -638,11 +705,21 @@ export function RichEditor({ slug, persisted, value, sourceMode, title, onChange
           aria-label="Table options"
           aria-haspopup="true"
           aria-expanded={tableMenuOpen}
-          onMouseDown={(event) => event.preventDefault()}
-          onClick={() => setTableMenuOpen((open) => !open)}
+          onPointerDown={(event) => event.preventDefault()}
+          onClick={() => {
+            const nextOpen = !tableMenuOpenRef.current;
+            tableMenuOpenRef.current = nextOpen;
+            setTableMenuOpen(nextOpen);
+          }}
         ><Ellipsis size={18} /></button>
-        {tableMenuOpen && <div className="table-edit-menu" role="group" aria-label="Table options">
+        {tableMenuOpen && <div
+          className={tableControlsPosition.menuAbove ? "table-edit-menu table-edit-menu-above" : "table-edit-menu"}
+          role="group"
+          aria-label="Table options"
+        >
+          <TableControlButton label="Add row before" onClick={() => { editor.chain().focus().addRowBefore().run(); setTableMenuOpen(false); }}><Plus size={15} /><span>Add row before</span></TableControlButton>
           <TableControlButton label="Add row after" onClick={() => { editor.chain().focus().addRowAfter().run(); setTableMenuOpen(false); }}><Plus size={15} /><span>Add row after</span></TableControlButton>
+          <TableControlButton label="Add column before" onClick={() => { editor.chain().focus().addColumnBefore().run(); setTableMenuOpen(false); }}><Plus size={15} /><span>Add column before</span></TableControlButton>
           <TableControlButton label="Add column after" onClick={() => { editor.chain().focus().addColumnAfter().run(); setTableMenuOpen(false); }}><Plus size={15} /><span>Add column after</span></TableControlButton>
           <span className="table-menu-separator" />
           <TableControlButton label="Remove column" onClick={() => { editor.chain().focus().deleteColumn().run(); setTableMenuOpen(false); }} disabled={!editor.can().deleteColumn()} destructive><Trash2 size={15} /><span>Remove column</span></TableControlButton>
@@ -688,7 +765,9 @@ function TableControlButton({ label, onClick, children, disabled = false, destru
       aria-label={label}
       disabled={disabled}
       className={destructive ? "table-edit-button table-edit-button-destructive" : "table-edit-button"}
-      onMouseDown={(event) => event.preventDefault()}
+      onPointerDown={(event) => {
+        if (event.pointerType === "mouse") event.preventDefault();
+      }}
       onClick={onClick}
     >{children}</button>
   );
