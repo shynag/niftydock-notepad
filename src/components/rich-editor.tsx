@@ -45,9 +45,15 @@ export function RichEditor({ slug, persisted, value, sourceMode, title, onChange
   const [tableControlsPosition, setTableControlsPosition] = useState<TableControlsPosition | null>(null);
   const [tableMenuOpen, setTableMenuOpen] = useState(false);
   const [collaborationReady, setCollaborationReady] = useState(false);
+  const [localDraftReady, setLocalDraftReady] = useState(false);
+  const [collaborationLoadFailed, setCollaborationLoadFailed] = useState(false);
   const tableControlsRef = useRef<HTMLDivElement>(null);
+  const retryCollaborationRef = useRef<() => void>(() => undefined);
   const tableMenuOpenRef = useRef(tableMenuOpen);
   tableMenuOpenRef.current = tableMenuOpen;
+  const initiallyPersistedRef = useRef(persisted);
+  const startedAsDraftRef = useRef(!persisted);
+  const localDraftReadyRef = useRef(false);
   const [ydoc] = useState(() => new Y.Doc());
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
@@ -217,7 +223,7 @@ export function RichEditor({ slug, persisted, value, sourceMode, title, onChange
 
   const editor = useEditor({
     immediatelyRender: false,
-    editable: !persisted,
+    editable: !initiallyPersistedRef.current && !initialValueRef.current.trim(),
     extensions: [...createNoteEditorExtensions(), Collaboration.configure({ document: ydoc })],
     editorProps: {
       attributes: {
@@ -251,9 +257,11 @@ export function RichEditor({ slug, persisted, value, sourceMode, title, onChange
     let flushPromise: Promise<void> | null = null;
     let debounceTimer: number | undefined;
     let retryTimer: number | undefined;
+    let syncRetryTimer: number | undefined;
     let fallbackSyncTimer: number | undefined;
     let broadcastRetryTimer: number | undefined;
     let retryDelay = 1000;
+    let syncRetryDelay = 1000;
     let broadcastRetryDelay = 2000;
     let pending: Uint8Array[] = [];
     let resolveReady: () => void = () => undefined;
@@ -336,6 +344,10 @@ export function RichEditor({ slug, persisted, value, sourceMode, title, onChange
     if (!persisted) {
       setCollaborationReady(false);
       editor.setEditable(!initialValueRef.current.trim());
+      if (!initialValueRef.current.trim()) {
+        localDraftReadyRef.current = true;
+        setLocalDraftReady(true);
+      }
       setStatus("offline");
       flushHandlerRef.current = async () => undefined;
       onFlushReady(flushHandlerRef.current, false);
@@ -347,10 +359,14 @@ export function RichEditor({ slug, persisted, value, sourceMode, title, onChange
             editor.commands.setContent(initialValueRef.current, { contentType: "markdown" });
             onPlainTextChangeRef.current(editor.getText());
           }
+          localDraftReadyRef.current = true;
+          setLocalDraftReady(true);
           editor.setEditable(true);
         });
       } catch {
         // The note still stays in component state if browser IndexedDB is unavailable.
+        localDraftReadyRef.current = true;
+        setLocalDraftReady(true);
         editor.setEditable(true);
       }
       return () => {
@@ -361,7 +377,7 @@ export function RichEditor({ slug, persisted, value, sourceMode, title, onChange
     }
 
     setCollaborationReady(false);
-    editor.setEditable(false);
+    editor.setEditable(localDraftReadyRef.current);
     setStatus("connecting");
 
     const scheduleRetry = () => {
@@ -371,6 +387,16 @@ export function RichEditor({ slug, persisted, value, sourceMode, title, onChange
         void flushUpdates();
       }, retryDelay);
       retryDelay = Math.min(retryDelay * 2, 30000);
+    };
+
+    let syncFromServer: () => Promise<void>;
+    const scheduleSyncRetry = () => {
+      if (!active || syncRetryTimer !== undefined) return;
+      syncRetryTimer = window.setTimeout(() => {
+        syncRetryTimer = undefined;
+        void syncFromServer();
+      }, syncRetryDelay);
+      syncRetryDelay = Math.min(syncRetryDelay * 2, 30000);
     };
 
     const flushUpdates = async () => {
@@ -458,7 +484,7 @@ export function RichEditor({ slug, persisted, value, sourceMode, title, onChange
       scheduleFlush();
     };
 
-    const syncFromServer = async () => {
+    syncFromServer = async () => {
       if (syncingRemote) {
         syncAgain = true;
         return;
@@ -480,29 +506,35 @@ export function RichEditor({ slug, persisted, value, sourceMode, title, onChange
 
         let initialState = result.state;
         if (!result.initialized) {
-          let seedEditor: TiptapEditor | null = null;
-          let seedDoc: Y.Doc | null = null;
-          try {
-            seedEditor = new TiptapEditor({
-              extensions: createNoteEditorExtensions(),
-              content: result.markdown ?? "",
-              contentType: "markdown",
-              editable: false,
-            });
-            seedDoc = prosemirrorJSONToYDoc(seedEditor.schema, seedEditor.getJSON(), "default");
-            seedDoc.getMap("metadata").set("title", result.title ?? titleRef.current);
-            const response = await fetch(`/api/notes/${encodeURIComponent(slug)}/collaboration`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ state: encodeBase64(Y.encodeStateAsUpdate(seedDoc)) }),
-            });
-            if (!response.ok) throw new Error("Could not initialize collaboration data.");
-            const initialized = await response.json() as { state: string };
-            initialState = initialized.state;
-          } finally {
-            seedEditor?.destroy();
-            seedDoc?.destroy();
+          if (startedAsDraftRef.current && editor.getText()) {
+            ydoc.getMap("metadata").set("title", titleRef.current);
+            initialState = encodeBase64(Y.encodeStateAsUpdate(ydoc));
+          } else {
+            let seedEditor: TiptapEditor | null = null;
+            let seedDoc: Y.Doc | null = null;
+            try {
+              seedEditor = new TiptapEditor({
+                extensions: createNoteEditorExtensions(),
+                content: result.markdown ?? "",
+                contentType: "markdown",
+                editable: false,
+              });
+              seedDoc = prosemirrorJSONToYDoc(seedEditor.schema, seedEditor.getJSON(), "default");
+              seedDoc.getMap("metadata").set("title", result.title ?? titleRef.current);
+              initialState = encodeBase64(Y.encodeStateAsUpdate(seedDoc));
+            } finally {
+              seedEditor?.destroy();
+              seedDoc?.destroy();
+            }
           }
+          const response = await fetch(`/api/notes/${encodeURIComponent(slug)}/collaboration`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ state: initialState }),
+          });
+          if (!response.ok) throw new Error("Could not initialize collaboration data.");
+          const initialized = await response.json() as { state: string };
+          initialState = initialized.state;
         }
         if (!initialState) throw new Error("Collaboration state is missing.");
 
@@ -521,16 +553,25 @@ export function RichEditor({ slug, persisted, value, sourceMode, title, onChange
 
         const metadata = ydoc.getMap("metadata");
         if (metadata.get("remoteInitialized") !== true) metadata.set("remoteInitialized", true);
+        setCollaborationLoadFailed(false);
+        syncRetryDelay = 1000;
+        if (syncRetryTimer !== undefined) {
+          window.clearTimeout(syncRetryTimer);
+          syncRetryTimer = undefined;
+        }
         markEditorReady();
         if (pending.length) void flushUpdates();
       } catch {
         if (!active) return;
         await persistence?.whenSynced;
         if (ydoc.getMap("metadata").get("remoteInitialized") === true) {
+          setCollaborationLoadFailed(false);
           markEditorReady();
         } else {
+          setCollaborationLoadFailed(true);
           setStatus("error");
         }
+        scheduleSyncRetry();
       } finally {
         syncingRemote = false;
         if (active && syncAgain) {
@@ -538,6 +579,15 @@ export function RichEditor({ slug, persisted, value, sourceMode, title, onChange
           void syncFromServer();
         }
       }
+    };
+    retryCollaborationRef.current = () => {
+      if (syncRetryTimer !== undefined) {
+        window.clearTimeout(syncRetryTimer);
+        syncRetryTimer = undefined;
+      }
+      syncRetryDelay = 1000;
+      setCollaborationLoadFailed(false);
+      void syncFromServer();
     };
 
     ydoc.on("update", onLocalUpdate);
@@ -631,14 +681,15 @@ export function RichEditor({ slug, persisted, value, sourceMode, title, onChange
       ydoc.off("update", onLocalUpdate);
       if (debounceTimer !== undefined) window.clearTimeout(debounceTimer);
       if (retryTimer !== undefined) window.clearTimeout(retryTimer);
+      if (syncRetryTimer !== undefined) window.clearTimeout(syncRetryTimer);
       if (fallbackSyncTimer !== undefined) window.clearInterval(fallbackSyncTimer);
       if (broadcastRetryTimer !== undefined) window.clearTimeout(broadcastRetryTimer);
       window.removeEventListener("pagehide", handlePageHide);
+      retryCollaborationRef.current = () => undefined;
       flushHandlerRef.current = async () => undefined;
       onFlushReady(async () => undefined, false);
       if (channel && supabase) void supabase.removeChannel(channel);
       void persistence?.destroy();
-      editor.setEditable(false);
       setCollaborationReady(false);
     };
   }, [editor, persisted, slug, ydoc, onFlushReady]);
@@ -669,15 +720,29 @@ export function RichEditor({ slug, persisted, value, sourceMode, title, onChange
 
   return (
     <>
-      <div className={sourceMode ? "collaboration-editor-shell source-mode-hidden" : "collaboration-editor-shell"} aria-busy={persisted && !collaborationReady}>
+      <div className={sourceMode ? "collaboration-editor-shell source-mode-hidden" : "collaboration-editor-shell"} aria-busy={persisted && !collaborationReady && !localDraftReady}>
         <EditorContent editor={editor} className={cnEditorContentClass(sourceMode)} />
-        {persisted && !collaborationReady && (
-          <div className="collaboration-editor-loading" role="status" aria-label="Loading shared note" aria-live="polite">
-            <div className="skeleton skeleton-line skeleton-line-long" />
-            <div className="skeleton skeleton-line skeleton-line-medium" />
-            <div className="skeleton skeleton-line skeleton-line-short" />
-            <div className="skeleton skeleton-line skeleton-line-long skeleton-line-spaced" />
-            <div className="skeleton skeleton-line skeleton-line-medium" />
+        {persisted && !collaborationReady && !localDraftReady && (
+          <div
+            className="collaboration-editor-loading"
+            role="status"
+            aria-label={collaborationLoadFailed ? "Could not load shared note" : "Loading shared note"}
+            aria-live="polite"
+          >
+            {collaborationLoadFailed ? (
+              <div className="collaboration-load-error">
+                <span>Could not load the shared note. Retrying...</span>
+                <button type="button" onClick={() => retryCollaborationRef.current()}>Retry now</button>
+              </div>
+            ) : (
+              <>
+                <div className="skeleton skeleton-line skeleton-line-long" />
+                <div className="skeleton skeleton-line skeleton-line-medium" />
+                <div className="skeleton skeleton-line skeleton-line-short" />
+                <div className="skeleton skeleton-line skeleton-line-long skeleton-line-spaced" />
+                <div className="skeleton skeleton-line skeleton-line-medium" />
+              </>
+            )}
           </div>
         )}
       </div>

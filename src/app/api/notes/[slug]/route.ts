@@ -21,7 +21,8 @@ export async function GET(_request: NextRequest, { params }: RouteContext) {
   const slug = rawSlug.toLowerCase();
   if (!isValidSlug(slug)) return jsonError("Invalid note slug.", 400);
 
-  const { data, error } = await createServiceClient()
+  const supabase = createServiceClient();
+  const { data, error } = await supabase
     .from("notes")
     .select(NOTE_FIELDS)
     .eq("slug", slug)
@@ -32,7 +33,28 @@ export async function GET(_request: NextRequest, { params }: RouteContext) {
     return jsonError("Could not load the note.", 500);
   }
   if (!data) return jsonError("Note not found.", 404);
-  return NextResponse.json({ note: data }, { headers: { "Cache-Control": "no-store" } });
+
+  const { data: collaborationDocument, error: collaborationError } = await supabase
+    .from("note_collaboration_documents")
+    .select("last_content_updated_at")
+    .eq("note_slug", slug)
+    .maybeSingle();
+  if (collaborationError) {
+    console.error("Supabase collaboration timestamp read failed:", collaborationError.message);
+    return jsonError("Could not load the note.", 500);
+  }
+
+  const noteUpdatedAt = new Date(data.updated_at).getTime();
+  const collaborationUpdatedAt = collaborationDocument
+    ? new Date(collaborationDocument.last_content_updated_at ?? "").getTime()
+    : Number.NEGATIVE_INFINITY;
+  const updatedAt = Number.isFinite(collaborationUpdatedAt)
+    ? new Date(Math.max(noteUpdatedAt, collaborationUpdatedAt)).toISOString()
+    : data.updated_at;
+
+  return NextResponse.json({
+    note: { ...data, updated_at: updatedAt },
+  }, { headers: { "Cache-Control": "no-store" } });
 }
 
 export async function PATCH(request: NextRequest, { params }: RouteContext) {

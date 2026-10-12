@@ -158,6 +158,8 @@ button { cursor: pointer; }
 .collaboration-editor-shell { position: relative; min-height: 340px; }
 .collaboration-editor-shell[aria-busy="true"] { min-height: 500px; }
 .collaboration-editor-loading { position: absolute; z-index: 4; inset: -26px -29px; overflow: hidden; border-radius: 13px; padding: 9px 28px; background: #17161c; }
+.collaboration-load-error { display: flex; min-height: 100%; align-items: center; justify-content: center; flex-direction: column; gap: 12px; color: #aaa4b0; font-size: 13px; text-align: center; }
+.collaboration-load-error button { min-height: 36px; padding: 0 12px; border: 1px solid #393640; border-radius: 7px; color: #d8c9ff; background: #292530; font-size: 12px; }
 .note-prose table { width: max-content; min-width: 100%; border-collapse: collapse; border-radius: 6px; }
 .note-prose th, .note-prose td { min-width: 100px; padding: 8px 10px; border: 1px solid #393440; text-align: left; }
 .note-prose th { color: #e0d9ed; background: #211e28; }
