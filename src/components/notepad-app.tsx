@@ -86,6 +86,11 @@ function fromApiNote(note: ApiNote): Note {
   };
 }
 
+function latestTimestamp(...timestamps: number[]) {
+  const validTimestamps = timestamps.filter(Number.isFinite);
+  return validTimestamps.length > 0 ? Math.max(...validTimestamps) : 0;
+}
+
 function formatDate(timestamp: number) {
   const date = new Date(timestamp);
   const now = new Date();
@@ -199,7 +204,7 @@ export function NotepadApp({ initialSlug }: { initialSlug?: string }) {
           ...item,
           title: hasLocalTitleChange ? item.title : remoteNote.title,
           version: remoteNote.version,
-          updatedAt: remoteNote.updatedAt,
+          updatedAt: latestTimestamp(item.updatedAt, remoteNote.updatedAt),
         };
       }));
     } catch {
@@ -491,7 +496,7 @@ export function NotepadApp({ initialSlug }: { initialSlug?: string }) {
         versionsRef.current[savedNote.slug] = savedNote.version;
         lastSavedTitleRef.current[savedNote.slug] = savedNote.title;
         setNotes((current) => current.map((currentNote) => currentNote.slug === savedNote.slug
-          ? { ...currentNote, title: version === 0 && !keepLocalTitle ? savedNote.title : currentNote.title, id: savedNote.id, version: savedNote.version, updatedAt: savedNote.updatedAt }
+          ? { ...currentNote, title: version === 0 && !keepLocalTitle ? savedNote.title : currentNote.title, id: savedNote.id, version: savedNote.version, updatedAt: latestTimestamp(currentNote.updatedAt, savedNote.updatedAt) }
           : currentNote));
         setSelectedId((currentSelectedId) => {
           const currentSelected = notesRef.current.find((currentNote) => currentNote.id === currentSelectedId);
@@ -521,15 +526,31 @@ export function NotepadApp({ initialSlug }: { initialSlug?: string }) {
 
   const updateContent = useCallback((markdown: unknown) => {
     const content = typeof markdown === "string" ? markdown : "";
-    const updatedAt = Date.now();
     setNotes((current) => {
-      return current.map((note) => (note.id === selectedId || (selected?.slug && note.slug === selected.slug)) ? { ...note, content, updatedAt } : note);
+      let changed = false;
+      const next = current.map((note) => {
+        if (!(note.id === selectedId || (selected?.slug && note.slug === selected.slug)) || note.content === content) {
+          return note;
+        }
+        changed = true;
+        return { ...note, content, updatedAt: Date.now() };
+      });
+      return changed ? next : current;
     });
   }, [selectedId, selected?.slug]);
 
   const updateTitle = useCallback((title: string) => {
-    const updatedAt = Date.now();
-    setNotes((current) => current.map((note) => (note.id === selectedId || (selected?.slug && note.slug === selected.slug)) ? { ...note, title, updatedAt } : note));
+    setNotes((current) => {
+      let changed = false;
+      const next = current.map((note) => {
+        if (!(note.id === selectedId || (selected?.slug && note.slug === selected.slug)) || note.title === title) {
+          return note;
+        }
+        changed = true;
+        return { ...note, title, updatedAt: Date.now() };
+      });
+      return changed ? next : current;
+    });
   }, [selectedId, selected?.slug]);
 
   const applyMarkdown = (operation: "h1" | "h2" | "bold" | "italic" | "bullet" | "ordered" | "checklist" | "quote" | "code" | "table") => {
