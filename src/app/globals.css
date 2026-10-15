@@ -137,17 +137,16 @@ button { cursor: pointer; }
 .note-prose li { padding-left: .2em; }
 .note-prose li::marker { color: #8e79bf; }
 .note-prose ul.contains-task-list { margin: .75em 0; padding-left: 0; list-style: none; }
-.note-prose li[data-type="taskItem"], .note-prose li:has(input[type="checkbox"]) { position: relative; display: block !important; min-height: 19px; margin: 0 0 8px; padding: 0 0 0 24px !important; list-style: none; }
-.note-prose li.task-list-item input[type="checkbox"] { position: absolute; top: .42em; left: 0; width: 15px; height: 15px; margin: 0; accent-color: #a17aec; }
-.note-prose li[data-type="taskItem"] > label, .note-prose li:has(input[type="checkbox"]) > label { position: absolute; top: 1px; left: 0; display: inline-flex; width: 15px; align-items: center; justify-content: center; margin: 2px 0 0; line-height: 1; }
+.note-prose li[data-type="taskItem"], .note-prose li:has(> label > input[type="checkbox"]) { display: flex !important; min-height: 19px; align-items: flex-start; margin: 0 0 8px; padding: 0 !important; list-style: none; }
+.note-prose li[data-type="taskItem"] > label, .note-prose li:has(> label > input[type="checkbox"]) > label { display: inline-flex; width: 15px; height: 15px; flex: 0 0 15px; align-items: center; justify-content: center; margin: .5em 9px 0 0; line-height: 1; }
 .note-prose li[data-type="taskItem"] > div,
 .note-prose li[data-type="taskItem"] > p,
-.note-prose li:has(input[type="checkbox"]) > div,
-.note-prose li:has(input[type="checkbox"]) > p { min-width: 0; margin: 0 !important; }
+.note-prose li:has(> label > input[type="checkbox"]) > div,
+.note-prose li:has(> label > input[type="checkbox"]) > p { min-width: 0; margin: 0 !important; }
 .note-prose li[data-type="taskItem"] > div > p,
-.note-prose li:has(input[type="checkbox"]) > div > p { margin: 0 !important; }
+.note-prose li:has(> label > input[type="checkbox"]) > div > p { margin: 0 !important; }
 .note-prose li[data-type="taskItem"] > label input,
-.note-prose li:has(input[type="checkbox"]) > label input { display: block; width: 13px; height: 13px; margin: 0; accent-color: #a17aec; }
+.note-prose li:has(> label > input[type="checkbox"]) > label input { display: block; width: 13px; height: 13px; margin: 0; accent-color: #a17aec; }
 .note-prose li[data-type="taskItem"] > div { flex: 1; }
 .note-prose li[data-type="taskItem"][data-checked="true"] > div { color: #77717e; text-decoration: line-through; text-decoration-color: #5a5461; }
 .note-prose blockquote { margin-left: 0; padding: 2px 0 2px 16px; border-left: 2px solid #8b70c7; color: #a9a2b0; }
